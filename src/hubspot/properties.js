@@ -112,12 +112,28 @@ export async function createProperty(objectType, definition, options = {}) {
     throw err;
   }
 
+  // HubSpot quirk: bool properties also require an `options` array (just like
+  // enumerations), but it's almost always [Yes:true, No:false]. If the caller
+  // didn't supply options for a bool, inject the standard pair so the call
+  // doesn't bounce off HubSpot with a confusing 400.
+  const finalDefinition =
+    definition?.type === "bool" &&
+    (!Array.isArray(definition.options) || definition.options.length === 0)
+      ? {
+          ...definition,
+          options: [
+            { label: "Yes", value: "true", displayOrder: 0 },
+            { label: "No", value: "false", displayOrder: 1 },
+          ],
+        }
+      : definition;
+
   let result = null;
   let error = null;
   let success = false;
   try {
     result = await withRetry(() =>
-      sdk.crm.properties.coreApi.create(objectType, definition)
+      sdk.crm.properties.coreApi.create(objectType, finalDefinition)
     );
     success = true;
   } catch (err) {
@@ -132,7 +148,7 @@ export async function createProperty(objectType, definition, options = {}) {
     session_id: env.sessionId,
     tool_name: "create_property",
     object_type: objectType,
-    object_id: definition?.name ?? null,
+    object_id: finalDefinition?.name ?? null,
     operation: "create",
     old_values: null,
     new_values: success ? { property: result } : null,

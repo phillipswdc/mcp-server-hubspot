@@ -158,7 +158,7 @@ export function registerPropertyTools(server) {
             )
             .optional()
             .describe(
-              "Required when type=enumeration. Each option needs label + value."
+              "Required when type=enumeration. ALSO required by HubSpot for type=bool — but the server auto-injects standard [Yes:true, No:false] when omitted for bool. If you want custom labels (e.g. Active/Inactive), pass options explicitly."
             ),
           formField: z
             .boolean()
