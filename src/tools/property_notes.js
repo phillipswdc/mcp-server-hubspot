@@ -17,15 +17,24 @@ import {
 export function registerPropertyNotesTools(server) {
   server.tool(
     "categorize_properties",
-    "Walk every property of a HubSpot object type and write a rule-based category (compact / potentially_large / computed / deprecated / system) to the local property_notes table. Returns a count summary by category. Useful before searches or updates so you know which fields are safe to fetch and which are likely to be large.",
+    "Walk every property of a HubSpot object type and write a category (compact / potentially_large / computed / deprecated / system) plus an optional one-line note to the local property_notes table. Uses the LLM (Ollama) when reachable for richer categories + auto-generated notes; falls back to rule-based categorization otherwise. Returns counts by category AND by source (so you can see what came from the LLM vs rules vs prior user notes). Useful before searches or updates so you know which fields are safe to fetch and which are likely to be large. Existing user-set notes survive re-runs.",
     {
       object_type: z
         .enum(SUPPORTED_OBJECT_TYPES)
         .describe("Which CRM object type to categorize"),
+      use_llm: z
+        .boolean()
+        .optional()
+        .default(true)
+        .describe(
+          "Use the LLM provider chain (Ollama → rules-only) for richer categorization with one-line notes. When false, skips the LLM entirely and uses only the rule-based categorizer. Defaults to true; ignored when no LLM provider is reachable (graceful fallback to rules)."
+        ),
     },
-    async ({ object_type }) => {
+    async ({ object_type, use_llm }) => {
       try {
-        return jsonText(await hubspot.categorizeProperties(object_type));
+        return jsonText(
+          await hubspot.categorizeProperties(object_type, { useLLM: use_llm })
+        );
       } catch (err) {
         return errorText(err, statusOf(err));
       }
