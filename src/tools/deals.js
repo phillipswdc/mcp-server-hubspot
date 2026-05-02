@@ -5,7 +5,7 @@ import { z } from "zod";
 import { hubspot } from "../hubspot/index.js";
 import { jsonText, plainText, errorText, statusOf } from "./_shared.js";
 import { searchInputShape } from "./_search.js";
-import { registerUpdateTool } from "./_mutations.js";
+import { registerUpdateTool, registerCreateTool } from "./_mutations.js";
 import { DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT } from "../config/constants.js";
 
 /**
@@ -128,5 +128,12 @@ export function registerDealTools(server) {
     idField: "deal_id",
     idDescription: "HubSpot internal deal ID",
     update: hubspot.updateDeal,
+  });
+
+  registerCreateTool(server, {
+    toolName: "create_deal",
+    description:
+      "Create a new HubSpot deal. Typically include `dealname`, `pipeline`, `dealstage`, and optionally `amount`. Captures the created entity in the audit log; rollback_change archives the deal.",
+    create: hubspot.createDeal,
   });
 }

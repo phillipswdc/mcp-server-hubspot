@@ -8,7 +8,7 @@ import { z } from "zod";
 import { hubspot } from "../hubspot/index.js";
 import { jsonText, plainText, errorText, statusOf } from "./_shared.js";
 import { searchInputShape } from "./_search.js";
-import { registerUpdateTool } from "./_mutations.js";
+import { registerUpdateTool, registerCreateTool } from "./_mutations.js";
 import { DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT } from "../config/constants.js";
 
 /**
@@ -127,5 +127,12 @@ export function registerTicketTools(server) {
     idField: "ticket_id",
     idDescription: "HubSpot internal ticket ID",
     update: hubspot.updateTicket,
+  });
+
+  registerCreateTool(server, {
+    toolName: "create_ticket",
+    description:
+      "Create a new HubSpot ticket. Must include `subject`. Often includes `hs_pipeline`, `hs_pipeline_stage`, `hs_ticket_priority`. Captures the created entity in the audit log; rollback_change archives the ticket.",
+    create: hubspot.createTicket,
   });
 }

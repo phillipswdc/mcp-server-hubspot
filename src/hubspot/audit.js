@@ -50,13 +50,15 @@ export async function rollbackChange(originalAuditId, options = {}) {
       `Audit row ${originalAuditId} was recorded in environment "${original.environment}", but current environment is "${env.name}". Switch HUBSPOT_ENV to roll it back.`
     );
 
-  if (original.operation === "create") {
-    throw new Error(
-      `Rollback of CREATE operations is not supported in Phase 3a. Will be added in Phase 3b.`
-    );
-  }
   if (original.operation === "delete") {
     throw new Error(`Rollback of DELETE operations is not supported.`);
+  }
+
+  // CREATE rollback = archive the entity we created. Routed through the
+  // dedicated helper because the audit shape is different (no properties to
+  // diff; we record an "archive" event).
+  if (original.operation === "create") {
+    return await rollbackCreate(original, options);
   }
   // operation === "update"
 
@@ -172,6 +174,99 @@ export async function rollbackChange(originalAuditId, options = {}) {
     changed_fields,
     result_id: result?.id,
     ...(drift.length ? { drift_overridden: drift } : {}),
+  };
+}
+
+/**
+ * Roll back a CREATE by archiving the entity we created.
+ *
+ * HubSpot's v3 DELETE endpoint is a soft archive — the entity is hidden from
+ * normal queries but restorable from the recycle bin / via unarchive. Truly
+ * irreversible deletion is a separate API. This is by design for our
+ * rollback semantics: undoing a create marks the entity inactive without
+ * losing its data permanently.
+ *
+ * Drift consideration: we don't compare property-by-property here because
+ * the rollback action is "make it not exist," not "restore values." We do
+ * a lightweight existence + archived check to confirm the entity still
+ * exists and isn't already archived.
+ *
+ * @param {object} original Audit row of the original create
+ * @param {{ confirmProduction?: boolean, force?: boolean }} options
+ */
+async function rollbackCreate(original, options) {
+  const basicApi = resolveBasicApi(original.object_type);
+  const objectId = original.object_id;
+  if (!objectId) {
+    throw new Error(
+      `Audit row ${original.id} has no object_id — cannot determine which entity to archive`
+    );
+  }
+
+  // Existence + archive-state check. If the entity has already been archived
+  // (manually, or via another rollback), there is nothing to undo here.
+  let exists = false;
+  let alreadyArchived = false;
+  try {
+    const current = await withRetry(() => basicApi.getById(objectId, []));
+    exists = true;
+    alreadyArchived = !!current?.archived;
+  } catch (err) {
+    const status = err?.code ?? err?.response?.status;
+    if (status === 404) {
+      exists = false;
+    } else {
+      throw err;
+    }
+  }
+
+  if (!exists && !options.force) {
+    throw new Error(
+      `Cannot roll back create of ${original.object_type}/${objectId} — the entity no longer exists in HubSpot. ` +
+        `Pass force: true to mark the audit row rolled_back anyway (no API call).`
+    );
+  }
+  if (alreadyArchived && !options.force) {
+    throw new Error(
+      `Cannot roll back create of ${original.object_type}/${objectId} — the entity is already archived. ` +
+        `Pass force: true to mark the audit row rolled_back anyway.`
+    );
+  }
+
+  const { result, audit_id } = await auditedMutation({
+    toolName: "rollback_change",
+    objectType: original.object_type,
+    operation: "delete",
+    args: {
+      rolled_back_audit_id: Number(original.id),
+      action: "archive",
+      object_id: objectId,
+      already_gone: !exists || alreadyArchived,
+    },
+    fetchExisting: async () =>
+      exists && !alreadyArchived
+        ? await withRetry(() => basicApi.getById(objectId, []))
+        : null,
+    perform: async () => {
+      if (exists && !alreadyArchived) {
+        await withRetry(() => basicApi.archive(objectId));
+      }
+      // Return a synthetic shape — there's no entity to fetch after archive.
+      return { id: objectId, archived: true };
+    },
+    confirmProduction: options.confirmProduction,
+    rollbackAuditId: Number(original.id),
+  });
+
+  markRolledBack(Number(original.id), audit_id);
+
+  return {
+    original_audit_id: Number(original.id),
+    rollback_audit_id: audit_id,
+    operation: "create_rollback",
+    archived_object_id: objectId,
+    note:
+      "HubSpot's v3 DELETE is a soft archive — the entity is hidden but restorable via the HubSpot recycle bin if needed.",
   };
 }
 

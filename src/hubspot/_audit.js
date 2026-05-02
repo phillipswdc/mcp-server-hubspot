@@ -179,6 +179,59 @@ export async function auditedUpdate({
 }
 
 /**
+ * Convenience wrapper for CREATE operations across all CRM object types.
+ *
+ * Captures null as old_values (the entity didn't exist), runs the create,
+ * then re-fetches the created entity with the user's property list so the
+ * audit row's new_values is shape-comparable to update audits.
+ *
+ * @param {object} params
+ * @param {string} params.toolName e.g. "create_contact"
+ * @param {string} params.objectType "contacts" | "companies" | "deals" | "tickets"
+ * @param {object} params.basicApi SDK basicApi for the object type
+ * @param {readonly string[]} params.defaultProperties Used only when caller doesn't specify `returnProperties`
+ * @param {Record<string,unknown>} params.properties Property values to set on the new entity
+ * @param {string[]} [params.returnProperties] Properties to capture in new_values; defaults to keys of `properties`
+ * @param {boolean} [params.confirmProduction=false] Production guard flag from the tool args
+ * @returns {Promise<{ result: object, audit_id: number }>}
+ */
+export async function auditedCreate({
+  toolName,
+  objectType,
+  basicApi,
+  defaultProperties,
+  properties,
+  returnProperties,
+  confirmProduction = false,
+}) {
+  const propsToCapture =
+    returnProperties && returnProperties.length
+      ? [...new Set(returnProperties)]
+      : [...new Set([...Object.keys(properties), ...defaultProperties])];
+
+  return await auditedMutation({
+    toolName,
+    objectType,
+    operation: "create",
+    args: { properties },
+    // No prior state — entity doesn't exist yet.
+    fetchExisting: async () => null,
+    perform: async () => {
+      const created = await withRetry(() =>
+        basicApi.create({ properties })
+      );
+      // Re-fetch with the canonical property list so new_values has the
+      // same shape we'd capture on a subsequent update.
+      return await withRetry(() =>
+        basicApi.getById(created.id, propsToCapture)
+      );
+    },
+    filterCapturedKeys: propsToCapture,
+    confirmProduction,
+  });
+}
+
+/**
  * Construct the standard error thrown when a production mutation is missing
  * the explicit `confirm_production: true` flag.
  *

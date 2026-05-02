@@ -10,6 +10,7 @@ import {
   searchContacts,
   listRecentContacts,
   updateContact,
+  createContact,
 } from "./contacts.js";
 import { listProperties, getProperty } from "./properties.js";
 import {
@@ -17,6 +18,7 @@ import {
   getCompanyByDomain,
   searchCompanies,
   updateCompany,
+  createCompany,
 } from "./companies.js";
 import {
   getDealById,
@@ -24,6 +26,7 @@ import {
   listDealsForCompany,
   listDealsForContact,
   updateDeal,
+  createDeal,
 } from "./deals.js";
 import {
   getTicketById,
@@ -31,6 +34,7 @@ import {
   listTicketsForContact,
   listTicketsForCompany,
   updateTicket,
+  createTicket,
 } from "./tickets.js";
 import {
   rollbackChange,
@@ -64,12 +68,14 @@ export const hubspot = {
   searchContacts,
   listRecentContacts,
   updateContact,
+  createContact,
 
   // Companies
   getCompanyById,
   getCompanyByDomain,
   searchCompanies,
   updateCompany,
+  createCompany,
 
   // Deals
   getDealById,
@@ -77,6 +83,7 @@ export const hubspot = {
   listDealsForCompany,
   listDealsForContact,
   updateDeal,
+  createDeal,
 
   // Tickets
   getTicketById,
@@ -84,6 +91,7 @@ export const hubspot = {
   listTicketsForContact,
   listTicketsForCompany,
   updateTicket,
+  createTicket,
 
   // Audit + rollback
   rollbackChange,

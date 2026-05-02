@@ -6,7 +6,7 @@ import { sdk } from "./client.js";
 import { withRetry } from "./retry.js";
 import { compact } from "./compact.js";
 import { buildSearchRequest, normalizeSearchResponse } from "./_search.js";
-import { auditedUpdate } from "./_audit.js";
+import { auditedUpdate, auditedCreate } from "./_audit.js";
 import { DEFAULT_COMPANY_PROPERTIES } from "../config/constants.js";
 
 /**
@@ -58,6 +58,25 @@ export async function searchCompanies(input) {
   const req = buildSearchRequest(input, DEFAULT_COMPANY_PROPERTIES);
   const res = await withRetry(() => sdk.crm.companies.searchApi.doSearch(req));
   return normalizeSearchResponse(res);
+}
+
+/**
+ * Create a new company. Routes through the audit wrapper.
+ *
+ * @param {Record<string,unknown>} properties Initial properties (typically include `name` and/or `domain`)
+ * @param {{ confirmProduction?: boolean, returnProperties?: string[] }} [options]
+ * @returns {Promise<{ result: object, audit_id: number }>}
+ */
+export async function createCompany(properties, options = {}) {
+  return await auditedCreate({
+    toolName: "create_company",
+    objectType: "companies",
+    basicApi: sdk.crm.companies.basicApi,
+    defaultProperties: DEFAULT_COMPANY_PROPERTIES,
+    properties,
+    returnProperties: options.returnProperties,
+    confirmProduction: options.confirmProduction,
+  });
 }
 
 /**

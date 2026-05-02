@@ -5,7 +5,7 @@ import { z } from "zod";
 import { hubspot } from "../hubspot/index.js";
 import { jsonText, plainText, errorText, statusOf } from "./_shared.js";
 import { searchInputShape } from "./_search.js";
-import { registerUpdateTool } from "./_mutations.js";
+import { registerUpdateTool, registerCreateTool } from "./_mutations.js";
 
 /**
  * Register all company-related MCP tools on a server instance.
@@ -80,5 +80,12 @@ export function registerCompanyTools(server) {
     idField: "company_id",
     idDescription: "HubSpot internal company ID",
     update: hubspot.updateCompany,
+  });
+
+  registerCreateTool(server, {
+    toolName: "create_company",
+    description:
+      "Create a new HubSpot company. Typically include `name` and/or `domain`. Captures the created entity in the audit log; rollback_change archives the company.",
+    create: hubspot.createCompany,
   });
 }

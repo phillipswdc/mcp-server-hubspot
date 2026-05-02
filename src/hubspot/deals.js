@@ -6,7 +6,7 @@ import { withRetry } from "./retry.js";
 import { compact } from "./compact.js";
 import { buildSearchRequest, normalizeSearchResponse } from "./_search.js";
 import { listAssociatedObjects } from "./_associations.js";
-import { auditedUpdate } from "./_audit.js";
+import { auditedUpdate, auditedCreate } from "./_audit.js";
 import { DEFAULT_DEAL_PROPERTIES } from "../config/constants.js";
 
 /**
@@ -69,6 +69,25 @@ export async function listDealsForContact(contactId, options) {
     defaultProperties: DEFAULT_DEAL_PROPERTIES,
     shape: shapeDeal,
     options,
+  });
+}
+
+/**
+ * Create a new deal. Routes through the audit wrapper.
+ *
+ * @param {Record<string,unknown>} properties Initial properties (typically include `dealname`, `pipeline`, `dealstage`)
+ * @param {{ confirmProduction?: boolean, returnProperties?: string[] }} [options]
+ * @returns {Promise<{ result: object, audit_id: number }>}
+ */
+export async function createDeal(properties, options = {}) {
+  return await auditedCreate({
+    toolName: "create_deal",
+    objectType: "deals",
+    basicApi: sdk.crm.deals.basicApi,
+    defaultProperties: DEFAULT_DEAL_PROPERTIES,
+    properties,
+    returnProperties: options.returnProperties,
+    confirmProduction: options.confirmProduction,
   });
 }
 
