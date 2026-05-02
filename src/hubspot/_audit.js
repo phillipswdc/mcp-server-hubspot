@@ -133,7 +133,14 @@ export async function auditedUpdate({
     operation: "update",
     args: { id, properties },
     fetchExisting: () => withRetry(() => basicApi.getById(id, propsToCapture)),
-    perform: () => withRetry(() => basicApi.update(id, { properties })),
+    // Two API calls: do the write, then re-read with the same property list.
+    // This makes new_values shape-compatible with old_values so the changed_fields
+    // diff reflects real changes only — the SDK's update() response includes
+    // unrelated `hs_*` fields that would otherwise create noise.
+    perform: async () => {
+      await withRetry(() => basicApi.update(id, { properties }));
+      return await withRetry(() => basicApi.getById(id, propsToCapture));
+    },
     confirmProduction,
   });
 }

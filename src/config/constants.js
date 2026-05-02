@@ -63,7 +63,7 @@ export const DEFAULT_PAGE_LIMIT = 10;
 export const MAX_PAGE_LIMIT = 100;
 
 /** Max length of the `properties` array in any single tool call (Layer 1). */
-export const MAX_PROPERTIES_PER_REQUEST = 30;
+export const MAX_PROPERTIES_PER_REQUEST = 75;
 
 /**
  * Hard byte cap on a single MCP tool response (Layer 2). ~7.5K tokens at

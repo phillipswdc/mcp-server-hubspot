@@ -61,17 +61,42 @@ export async function rollbackChange(originalAuditId, options = {}) {
     );
   }
 
+  // Surgical rollback: only revert the keys the original update explicitly set.
+  // The audit row's args.properties represents user intent; old_values.properties
+  // may include extra fields the SDK auto-includes (hs_object_id, createdate,
+  // lastmodifieddate, etc.) which HubSpot rejects as read-only on write.
+  const originalIntent = original.args?.properties ?? {};
+  const keysToRollback = Object.keys(originalIntent);
+  if (!keysToRollback.length) {
+    throw new Error(
+      `Audit row ${originalAuditId} has no recorded args.properties — cannot determine what to roll back`
+    );
+  }
+  const propsToWrite = {};
+  for (const k of keysToRollback) {
+    // null clears the value when the original was unset/null
+    propsToWrite[k] = oldProps[k] ?? null;
+  }
+
   const { result, audit_id, changed_fields } = await auditedMutation({
     toolName: "rollback_change",
     objectType: original.object_type,
     operation: "update",
-    args: { rolled_back_audit_id: Number(originalAuditId) },
+    args: {
+      rolled_back_audit_id: Number(originalAuditId),
+      properties: propsToWrite,
+    },
     fetchExisting: () =>
-      withRetry(() => basicApi.getById(original.object_id, Object.keys(oldProps))),
-    perform: () =>
-      withRetry(() =>
-        basicApi.update(original.object_id, { properties: oldProps })
-      ),
+      withRetry(() => basicApi.getById(original.object_id, keysToRollback)),
+    perform: async () => {
+      await withRetry(() =>
+        basicApi.update(original.object_id, { properties: propsToWrite })
+      );
+      // Re-fetch with the same property list so new_values shape-matches old_values
+      return await withRetry(() =>
+        basicApi.getById(original.object_id, keysToRollback)
+      );
+    },
     confirmProduction: options.confirmProduction,
     rollbackAuditId: Number(originalAuditId),
   });
