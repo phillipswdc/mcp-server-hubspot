@@ -63,6 +63,18 @@ High-level flow:
 - Node.js `20+`
 - A HubSpot private app token for at least one environment
 
+## Quickstart
+
+For a guided 60-second setup:
+
+```bash
+npm install
+npm run setup        # interactive wizard: writes .env, prints Claude Desktop config
+npm run health-check # verifies env, token, Ollama, SQLite — exits 0 on success
+```
+
+Then paste the printed snippet into your Claude Desktop config and restart Desktop.
+
 ## Installation
 
 ```bash
@@ -181,15 +193,67 @@ Ticket responses omit `content` by default to keep payload size sane. Request it
 ### Environment, Audit, Rollback
 
 - `get_environment`
-  Reports the active HubSpot environment and local SQLite path.
+  Reports the active HubSpot environment, session_id, and local SQLite path.
 - `list_recent_changes`
-  Lightweight audit log listing.
+  Lightweight audit log listing. Filters: object_type, object_id, only_unrolled,
+  only_successful, session_id, current_session_only.
 - `get_change_detail`
   Full audit row detail, including old/new values and original tool args.
 - `rollback_change`
-  Reverses a prior change by writing captured `old_values` back.
+  Reverses a prior change. Two-tier drift check (lastmodifieddate fast-path,
+  field-level fallback). `force: true` overrides drift refusal. Handles both
+  UPDATE (revert) and CREATE (archive).
 - `prune_audit_log`
-  Deletes old audit rows when explicitly confirmed.
+  Deletes old audit rows. Composable filters: by age, by session_id, or
+  except_current_session. At least one filter is required.
+
+### Property Notes
+
+A persistent annotation layer on top of HubSpot's property schemas. Categories
+are auto-derived by rule (or by LLM if Ollama is available); user notes
+override and survive re-runs.
+
+- `categorize_properties`
+  Walk every property of an object type; write category + LLM-generated note
+  (when available) to `property_notes`. Source-tagged so you know which
+  annotations came from rules vs LLM vs manual edits.
+- `set_property_note`
+  Manually annotate one property. Overrides auto-derived values.
+- `get_property_notes`
+  Read annotations, optionally filtered by property_name or category.
+
+### Cache Tools
+
+The local `result_cache` table holds two cache shapes: full search/list
+result-sets behind a handle, and oversized property values replaced inline
+with a `__cached_ref` handle. Default TTL: 1 hour.
+
+- `query_cache`
+  Filter, sort, paginate against a cached result-set — runs entirely on local
+  SQLite, zero HubSpot API calls. Useful for drilling into a previously
+  cached search.
+- `cache_summary`
+  Inspect a cached result-set without rehydrating its contents — counts,
+  field frequencies, expiration.
+- `list_active_caches`
+  What's currently in cache (this environment / session / type).
+- `expire_cache`
+  Manually delete a cache entry.
+- `get_cached_value`
+  Dereference a property value that was auto-cached because it exceeded the
+  inline-response threshold.
+
+### LLM Tools
+
+LLM-enhanced features run through a provider chain (Ollama → rules-only).
+Failures degrade gracefully — the calling tool always returns a result.
+
+- `llm_status`
+  Report which providers are configured and reachable, and which model is
+  pulled. Diagnose why LLM-enhanced tools are degraded.
+- `summarize_audit_history`
+  Feed recent audit rows to the LLM for a token-tight narrative summary.
+  Falls back to a deterministic count-by-tool summary when no LLM is available.
 
 ## Search Model
 
@@ -386,10 +450,38 @@ This server is intentionally biased toward small, inspectable changes rather tha
 - Default page size: `10`
 - Max requested properties per call: `75`
 - Property metadata cache TTL: `5 minutes`
-- Response payload hard cap: about `30,000` bytes
+- Response payload hard cap: about `30,000` bytes (refuses, doesn't truncate)
+- Property values over `2,000` bytes are auto-cached and replaced with a
+  `__cached_ref` handle (full value retrievable via `get_cached_value`)
 - HubSpot `429` responses are retried automatically
+- LLM result-set cache TTL: `1 hour` (for `cache: true` flag on search/list tools)
 
 If a response would be too large, the server refuses and expects the caller to narrow scope.
+
+## Optional: Ollama for LLM features
+
+If Ollama is installed and reachable at `http://localhost:11434`, the server
+uses it for richer property categorization, audit summaries, and other
+LLM-enhanced output. The default model is `gemma4:e4b` (Google, 4.5B
+effective params, ~9.6 GB on disk).
+
+```bash
+brew install ollama
+ollama serve &
+ollama pull gemma4:e4b   # or `gemma4:e2b` for lighter footprint (~7.2 GB)
+```
+
+When Ollama is unreachable, every LLM-aware tool falls back to deterministic
+rule-based output. The fallback is silent (no errors), but the response's
+`source` field will read `rules-derived` instead of `llm-derived:ollama:...`
+so you can always tell which path produced any given annotation.
+
+Override the defaults in `.env`:
+
+```dotenv
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=gemma4:e4b
+```
 
 ## Repo Layout
 

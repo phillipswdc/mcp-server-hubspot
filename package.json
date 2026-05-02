@@ -6,7 +6,13 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "dev": "node --watch src/index.js",
+    "setup": "node bin/setup.js",
+    "health-check": "node bin/health-check.js"
+  },
+  "bin": {
+    "hubspot-mcp-setup": "bin/setup.js",
+    "hubspot-mcp-health": "bin/health-check.js"
   },
   "engines": {
     "node": ">=20"
