@@ -1,0 +1,12 @@
+node_modules/
+.env
+*.log
+.DS_Store
+.idea/
+.vscode/
+dist/
+coverage/
+data/
+
+# Per-machine Claude Code permissions (track .claude/settings.json if/when it exists)
+.claude/settings.local.json

@@ -1,0 +1,22 @@
+{
+  "name": "hubspot-mcp",
+  "version": "0.1.0",
+  "description": "HubSpot MCP server for Claude Desktop",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "@hubspot/api-client": "^13.5.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "better-sqlite3": "^12.9.0",
+    "dotenv": "^17.4.2",
+    "zod": "^4.4.1"
+  }
+}
