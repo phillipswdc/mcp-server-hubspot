@@ -12,8 +12,13 @@
 import { db, nowMs } from "../index.js";
 import { randomUUID, createHash } from "node:crypto";
 
+// INSERT OR REPLACE because cache_ids are content-addressed (SHA-256 prefix
+// of the payload). When the same content is cached again — most commonly when
+// a stale expired row hasn't been swept yet — we want to seamlessly refresh
+// the TTL on the existing row, not crash on PRIMARY KEY collision. Replace
+// is the correct semantics: identical content → one row, refreshed timestamp.
 const INSERT = db.prepare(`
-  INSERT INTO result_cache
+  INSERT OR REPLACE INTO result_cache
     (cache_id, cache_type, tool_name, source_args, object_type, payload,
      result_count, byte_length, preview, created_at, expires_at, environment, session_id)
   VALUES

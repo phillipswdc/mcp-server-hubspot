@@ -85,7 +85,10 @@ export function autoCacheLargeValues(properties, context = {}) {
     didCache = true;
   }
 
-  // Opportunistic eviction of expired rows — no background job needed.
+  // Opportunistic eviction of expired rows — keeps the table bounded over
+  // time without a background job. Insert is INSERT OR REPLACE so a stale
+  // row with the same content-hash id wouldn't crash anyway, but pruning
+  // keeps the table size tied to active cache load.
   if (didCache) pruneExpired();
   return out;
 }
@@ -118,6 +121,11 @@ export function cacheResultSet({
   const cacheId = newCacheId(payload);
   const expiresAt = Date.now() + ttlMs;
 
+  // Sweep expired rows BEFORE the insert so the table stays bounded. The
+  // insert itself uses INSERT OR REPLACE, so collisions on the
+  // content-addressed cache_id refresh the existing row gracefully.
+  pruneExpired();
+
   insertCache({
     cache_id: cacheId,
     cache_type: "result_set",
@@ -132,7 +140,6 @@ export function cacheResultSet({
     environment: env.name,
     session_id: env.sessionId,
   });
-  pruneExpired();
 
   return { cache_id: cacheId, expires_at: expiresAt, byte_length: byteLength };
 }
