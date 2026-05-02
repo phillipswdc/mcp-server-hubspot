@@ -92,15 +92,48 @@ export async function rollbackChange(originalAuditId, options = {}) {
       oldVal === null || oldVal === undefined ? "" : oldVal;
   }
 
-  // Drift detection: fetch the current state of the keys we're about to revert
-  // and compare to the audit row's new_values. If anything changed externally
-  // since the original update, refuse unless force is set.
-  const expectedCurrent = original.new_values?.properties ?? {};
+  // Drift detection: two-tier check.
+  //
+  // Tier 1 (fast path): compare HubSpot's current `updatedAt` for the entity
+  //   to the `last_modified_at` we recorded when the audit row was written.
+  //   If they match exactly, the entity has not been touched since our
+  //   mutation — safe to roll back regardless of which fields were changed.
+  //
+  // Tier 2 (deep check): if the timestamp differs, something modified the
+  //   entity since our update. Run a field-level comparison on just the keys
+  //   we plan to revert. If our specific keys still match what we wrote,
+  //   external changes were on OTHER fields — still safe to roll back ours.
+  //   If our keys drifted, refuse unless force is true.
+  const recordedLastModifiedAt = original.last_modified_at;
+  const fetchProps = [...keysToRollback];
+  // Always include lastmodifieddate so we can do the timestamp tier check.
+  if (!fetchProps.includes("lastmodifieddate")) fetchProps.push("lastmodifieddate");
+  if (!fetchProps.includes("hs_lastmodifieddate")) fetchProps.push("hs_lastmodifieddate");
   const currentSnapshot = await withRetry(() =>
-    basicApi.getById(original.object_id, keysToRollback)
+    basicApi.getById(original.object_id, fetchProps)
   );
   const actualCurrent = currentSnapshot?.properties ?? {};
-  const drift = detectDrift(actualCurrent, expectedCurrent, keysToRollback);
+  const currentLastModifiedAt = parseHsDate(
+    currentSnapshot?.updatedAt ??
+      actualCurrent.lastmodifieddate ??
+      actualCurrent.hs_lastmodifieddate
+  );
+
+  let drift = [];
+  let driftCheckMode = null;
+  if (
+    recordedLastModifiedAt &&
+    currentLastModifiedAt &&
+    recordedLastModifiedAt === currentLastModifiedAt
+  ) {
+    // Tier 1 pass — no external changes anywhere on this entity.
+    driftCheckMode = "timestamp_match";
+  } else {
+    // Tier 2 — entity was touched. Check our specific fields.
+    driftCheckMode = "field_level_after_timestamp_mismatch";
+    const expectedCurrent = original.new_values?.properties ?? {};
+    drift = detectDrift(actualCurrent, expectedCurrent, keysToRollback);
+  }
 
   if (drift.length && !options.force) {
     const lines = drift
@@ -173,6 +206,7 @@ export async function rollbackChange(originalAuditId, options = {}) {
     rollback_audit_id: audit_id,
     changed_fields,
     result_id: result?.id,
+    drift_check: driftCheckMode,
     ...(drift.length ? { drift_overridden: drift } : {}),
   };
 }
@@ -268,6 +302,20 @@ async function rollbackCreate(original, options) {
     note:
       "HubSpot's v3 DELETE is a soft archive — the entity is hidden but restorable via the HubSpot recycle bin if needed.",
   };
+}
+
+/**
+ * Parse a HubSpot date value (ISO string or unix-ms number) into unix-ms.
+ * Returns null if unparseable.
+ *
+ * @param {unknown} value
+ * @returns {number|null}
+ */
+function parseHsDate(value) {
+  if (value == null) return null;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  const t = Date.parse(String(value));
+  return Number.isFinite(t) ? t : null;
 }
 
 /**

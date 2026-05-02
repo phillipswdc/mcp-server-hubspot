@@ -89,6 +89,7 @@ export async function auditedMutation({
 
   const audit_id = insertAudit({
     environment: env.name,
+    session_id: env.sessionId,
     tool_name: toolName,
     object_type: objectType,
     object_id: result?.id ?? fullOld?.id ?? null,
@@ -99,6 +100,7 @@ export async function auditedMutation({
     args,
     success,
     error: error ? String(error?.message ?? error) : null,
+    last_modified_at: extractLastModifiedAt(result),
     rollback_audit_id: rollbackAuditId,
   });
 
@@ -109,6 +111,35 @@ export async function auditedMutation({
   }
 
   return { result, audit_id, changed_fields };
+}
+
+/**
+ * Extract HubSpot's lastmodifieddate from a SimplePublicObject result and
+ * convert to unix-ms. Returns null if the result is missing or doesn't have
+ * a recognizable timestamp.
+ *
+ * Used to record "when did HubSpot say this entity was last touched, as of
+ * our mutation" — the fast-path drift signal for rollback (Phase 4a.2).
+ *
+ * @param {object|null|undefined} result SimplePublicObject from getById/update
+ * @returns {number|null} Unix milliseconds, or null
+ */
+function extractLastModifiedAt(result) {
+  if (!result) return null;
+  // HubSpot returns lastmodifieddate (and hs_lastmodifieddate for some objects)
+  // on the properties dict, plus an SDK-level updatedAt at the top level.
+  // updatedAt is the most reliable cross-object-type signal.
+  const sources = [
+    result.updatedAt,
+    result.properties?.lastmodifieddate,
+    result.properties?.hs_lastmodifieddate,
+  ];
+  for (const s of sources) {
+    if (!s) continue;
+    const t = typeof s === "string" ? Date.parse(s) : Number(s);
+    if (Number.isFinite(t)) return t;
+  }
+  return null;
 }
 
 /**

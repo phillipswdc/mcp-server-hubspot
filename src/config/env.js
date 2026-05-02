@@ -6,7 +6,12 @@
  * No defaults. The server hard-fails on startup if HUBSPOT_ENV is missing or
  * the matching token isn't set. This forces an explicit choice between
  * sandbox and production every time the server is configured.
+ *
+ * Also generates a session_id (UUID) at startup — one per process — used to
+ * tag audit_log rows so users can scope queries and pruning to "what this
+ * server instance did" rather than the entire history.
  */
+import { randomUUID } from "node:crypto";
 
 /** Allowed values for HUBSPOT_ENV. */
 export const VALID_ENVS = Object.freeze(["sandbox", "production"]);
@@ -62,4 +67,12 @@ export const env = Object.freeze({
   isProduction: active === "production",
   /** True when active env is sandbox. */
   isSandbox: active === "sandbox",
+  /**
+   * UUID generated once per server process. Stamped onto every audit_log row
+   * so downstream queries (and pruning) can scope to "this session's work."
+   * Persists across MCP tool calls within the same Claude Desktop launch.
+   */
+  sessionId: randomUUID(),
+  /** Unix-ms when this process booted; useful for session-relative timing. */
+  startedAt: Date.now(),
 });

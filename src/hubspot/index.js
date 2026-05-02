@@ -50,12 +50,14 @@ export const hubspot = {
   /** @returns {readonly string[]} Supported HubSpot object types. */
   supportedObjectTypes: () => [...SUPPORTED_OBJECT_TYPES],
 
-  /** @returns {{ name: string, isProduction: boolean, isSandbox: boolean, db_path: string }} */
+  /** @returns {{ name: string, isProduction: boolean, isSandbox: boolean, db_path: string, session_id: string, started_at_iso: string }} */
   environment: () => ({
     name: env.name,
     isProduction: env.isProduction,
     isSandbox: env.isSandbox,
     db_path: dbPath,
+    session_id: env.sessionId,
+    started_at_iso: new Date(env.startedAt).toISOString(),
   }),
 
   // Property introspection

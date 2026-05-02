@@ -9,11 +9,11 @@ import { db, nowMs } from "../index.js";
 
 const INSERT = db.prepare(`
   INSERT INTO audit_log
-    (timestamp, environment, tool_name, object_type, object_id, operation,
+    (timestamp, environment, session_id, tool_name, object_type, object_id, operation,
      old_values, new_values, changed_fields, args,
-     success, error, rolled_back, rollback_audit_id)
+     success, error, last_modified_at, rolled_back, rollback_audit_id)
   VALUES
-    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
 `);
 
 const SELECT_BY_ID = db.prepare(`SELECT * FROM audit_log WHERE id = ?`);
@@ -60,6 +60,7 @@ const COUNT_OLDER_THAN = db.prepare(`
  *
  * @typedef {object} AuditRowInput
  * @property {string} environment "sandbox" or "production"
+ * @property {string|null} session_id UUID for the server-process session
  * @property {string} tool_name e.g. "update_contact"
  * @property {string} object_type "contacts" | "companies" | "deals" | "tickets"
  * @property {string|null} object_id HubSpot ID; null for failed creates
@@ -70,6 +71,7 @@ const COUNT_OLDER_THAN = db.prepare(`
  * @property {object} args Original tool arguments, for forensics
  * @property {boolean} success Did the underlying API call succeed?
  * @property {string|null} error Error message when !success
+ * @property {number|null} last_modified_at Unix-ms of HubSpot's lastmodifieddate after our mutation; used as a fast-path drift signal on rollback
  * @property {number|null} rollback_audit_id If this row IS a rollback, the original audit id it reverses
  */
 
@@ -82,6 +84,7 @@ export function insertAudit(row) {
   const info = INSERT.run(
     nowMs(),
     row.environment,
+    row.session_id ?? null,
     row.tool_name,
     row.object_type,
     row.object_id ?? null,
@@ -92,6 +95,7 @@ export function insertAudit(row) {
     JSON.stringify(row.args ?? {}),
     row.success ? 1 : 0,
     row.error ?? null,
+    row.last_modified_at ?? null,
     row.rollback_audit_id ?? null
   );
   return Number(info.lastInsertRowid);
