@@ -52,49 +52,72 @@ export function categorizePropertyByRule(prop) {
  *
  * Existing user-set notes survive thanks to the COALESCE-on-conflict logic.
  *
+ * Concurrency: when LLM is enabled, calls are dispatched through a small
+ * worker pool (default 2) to avoid saturating Ollama. Naive Promise.all
+ * here would issue N concurrent inference requests — a typical Ollama
+ * install serves only 1–2 in parallel, so the remainder queue or hit the
+ * 5s per-call timeout, falling back to rules silently. Worker-pool with
+ * matched concurrency keeps every call inside the timeout window.
+ *
  * @param {"contacts"|"companies"|"deals"|"tickets"} objectType
- * @param {{ useLLM?: boolean }} [options]
- * @returns {Promise<{ object_type: string, count: number, by_category: Record<string,number>, by_source: Record<string,number> }>}
+ * @param {{ useLLM?: boolean, llmConcurrency?: number, limit_props?: number }} [options]
+ * @returns {Promise<{ object_type: string, count: number, by_category: Record<string,number>, by_source: Record<string,number>, llm_concurrency: number, llm_used: boolean }>}
  */
-export async function categorizeProperties(objectType, { useLLM = true } = {}) {
-  const props = await listProperties(objectType);
+export async function categorizeProperties(
+  objectType,
+  { useLLM = true, llmConcurrency = 2, limit_props = null } = {}
+) {
+  const allProps = await listProperties(objectType);
+  const props =
+    Number.isFinite(limit_props) && limit_props > 0
+      ? allProps.slice(0, limit_props)
+      : allProps;
 
-  const rows = await Promise.all(
-    props.map(async (p) => {
-      const rule = categorizePropertyByRule(p);
-      let category = rule;
-      let notes = null;
-      let source = "auto";
+  const classifyOne = async (p) => {
+    const rule = categorizePropertyByRule(p);
+    let category = rule;
+    let notes = null;
+    let source = "auto";
 
-      if (useLLM) {
-        const llm = await classifyWithLLM(p, rule);
-        if (llm) {
-          // Cross-check: if rule is strong (potentially_large/computed/deprecated),
-          // trust it over the LLM. Only let the LLM upgrade compact/system → richer
-          // categories or generate notes.
-          if (
-            rule === "compact" ||
-            rule === "system" ||
-            (llm.category === rule)
-          ) {
-            category = PROPERTY_CATEGORIES.includes(llm.category)
-              ? llm.category
-              : rule;
-          }
-          notes = typeof llm.notes === "string" ? llm.notes.slice(0, 200) : null;
-          source = llm.source;
+    if (useLLM) {
+      const llm = await classifyWithLLM(p, rule);
+      if (llm) {
+        // Cross-check: if rule is strong (potentially_large/computed/deprecated),
+        // trust it over the LLM. Only let the LLM upgrade compact/system → richer
+        // categories or generate notes.
+        if (rule === "compact" || rule === "system" || llm.category === rule) {
+          category = PROPERTY_CATEGORIES.includes(llm.category) ? llm.category : rule;
         }
+        notes = typeof llm.notes === "string" ? llm.notes.slice(0, 200) : null;
+        // Source column has a CHECK constraint limited to 'auto'|'user'|'llm-derived'.
+        // Full provenance like "llm-derived:ollama:gemma4:e4b" is preserved in tool
+        // responses and llm_status; here we store the bucket only.
+        source = llm.source.startsWith("llm-derived") ? "llm-derived" : "auto";
       }
+    }
 
-      return {
-        object_type: objectType,
-        property_name: p.name,
-        category,
-        notes,
-        source,
-      };
-    })
-  );
+    return {
+      object_type: objectType,
+      property_name: p.name,
+      category,
+      notes,
+      source,
+    };
+  };
+
+  const rows = useLLM
+    ? await runWithConcurrency(props, llmConcurrency, classifyOne)
+    : props.map((p) => {
+        const rule = categorizePropertyByRule(p);
+        return {
+          object_type: objectType,
+          property_name: p.name,
+          category: rule,
+          notes: null,
+          source: "auto",
+        };
+      });
+
   upsertPropertyNotesBatch(rows);
 
   const byCategory = {};
@@ -106,9 +129,37 @@ export async function categorizeProperties(objectType, { useLLM = true } = {}) {
   return {
     object_type: objectType,
     count: rows.length,
+    total_available: allProps.length,
     by_category: byCategory,
     by_source: bySource,
+    llm_used: useLLM,
+    llm_concurrency: useLLM ? llmConcurrency : 0,
   };
+}
+
+/**
+ * Worker-pool runner. Processes `items` through `fn` with at most
+ * `concurrency` in flight at any time. Preserves input order in the
+ * returned results array.
+ *
+ * @template T,R
+ * @param {T[]} items
+ * @param {number} concurrency
+ * @param {(item: T, index: number) => Promise<R>} fn
+ * @returns {Promise<R[]>}
+ */
+async function runWithConcurrency(items, concurrency, fn) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.max(1, concurrency) }, async () => {
+    while (true) {
+      const i = nextIndex++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 /**

@@ -29,11 +29,33 @@ export function registerPropertyNotesTools(server) {
         .describe(
           "Use the LLM provider chain (Ollama → rules-only) for richer categorization with one-line notes. When false, skips the LLM entirely and uses only the rule-based categorizer. Defaults to true; ignored when no LLM provider is reachable (graceful fallback to rules)."
         ),
+      llm_concurrency: z
+        .number()
+        .int()
+        .min(1)
+        .max(8)
+        .optional()
+        .default(2)
+        .describe(
+          "Number of LLM calls to dispatch in parallel. Local Ollama typically serves 1–2 inferences at a time; raising this past your hardware's capacity causes timeouts and silent fallback to rules. Default 2."
+        ),
+      limit_props: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .describe(
+          "Optional cap on how many properties to categorize. Useful for testing the LLM path on a small subset before committing to a full categorization run (which can be slow at hundreds of properties)."
+        ),
     },
-    async ({ object_type, use_llm }) => {
+    async ({ object_type, use_llm, llm_concurrency, limit_props }) => {
       try {
         return jsonText(
-          await hubspot.categorizeProperties(object_type, { useLLM: use_llm })
+          await hubspot.categorizeProperties(object_type, {
+            useLLM: use_llm,
+            llmConcurrency: llm_concurrency,
+            limit_props,
+          })
         );
       } catch (err) {
         return errorText(err, statusOf(err));
