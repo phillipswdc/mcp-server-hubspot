@@ -60,12 +60,17 @@ export function categorizePropertyByRule(prop) {
  * matched concurrency keeps every call inside the timeout window.
  *
  * @param {"contacts"|"companies"|"deals"|"tickets"} objectType
- * @param {{ useLLM?: boolean, llmConcurrency?: number, limit_props?: number }} [options]
- * @returns {Promise<{ object_type: string, count: number, by_category: Record<string,number>, by_source: Record<string,number>, llm_concurrency: number, llm_used: boolean }>}
+ * @param {{ useLLM?: boolean, llmConcurrency?: number, limit_props?: number, categories_to_enrich?: string[] }} [options]
+ * @returns {Promise<object>}
  */
 export async function categorizeProperties(
   objectType,
-  { useLLM = true, llmConcurrency = 2, limit_props = null } = {}
+  {
+    useLLM = true,
+    llmConcurrency = 2,
+    limit_props = null,
+    categories_to_enrich = null,
+  } = {}
 ) {
   const allProps = await listProperties(objectType);
   const props =
@@ -73,50 +78,73 @@ export async function categorizeProperties(
       ? allProps.slice(0, limit_props)
       : allProps;
 
-  const classifyOne = async (p) => {
-    const rule = categorizePropertyByRule(p);
+  // Pass 1: rule-based categorization for ALL properties. Instant.
+  const ruleRows = props.map((p) => ({
+    prop: p,
+    rule: categorizePropertyByRule(p),
+  }));
+
+  // Decide which properties get LLM enrichment. When categories_to_enrich is
+  // set, properties whose rule-based category isn't in the list skip the LLM
+  // entirely — saves time + Ollama load. Computed/system fields are usually
+  // self-explanatory by name and don't benefit from LLM-generated notes.
+  const enrichmentFilter =
+    Array.isArray(categories_to_enrich) && categories_to_enrich.length
+      ? new Set(categories_to_enrich)
+      : null;
+
+  const needsEnrichment = useLLM
+    ? ruleRows.filter(({ rule }) =>
+        enrichmentFilter ? enrichmentFilter.has(rule) : true
+      )
+    : [];
+
+  // Pass 2: LLM enrichment, throttled through the worker pool.
+  /** @type {Map<string, { category: string, notes: string, source: string }>} */
+  const enriched = new Map();
+  if (needsEnrichment.length) {
+    const enrichedResults = await runWithConcurrency(
+      needsEnrichment,
+      llmConcurrency,
+      async ({ prop, rule }) => {
+        const llm = await classifyWithLLM(prop, rule);
+        return { name: prop.name, llm };
+      }
+    );
+    for (const { name, llm } of enrichedResults) {
+      if (llm) enriched.set(name, llm);
+    }
+  }
+
+  // Compose the final rows: LLM result if available + cross-checked, otherwise
+  // rule-based with no notes.
+  const rows = ruleRows.map(({ prop, rule }) => {
     let category = rule;
     let notes = null;
     let source = "auto";
 
-    if (useLLM) {
-      const llm = await classifyWithLLM(p, rule);
-      if (llm) {
-        // Cross-check: if rule is strong (potentially_large/computed/deprecated),
-        // trust it over the LLM. Only let the LLM upgrade compact/system → richer
-        // categories or generate notes.
-        if (rule === "compact" || rule === "system" || llm.category === rule) {
-          category = PROPERTY_CATEGORIES.includes(llm.category) ? llm.category : rule;
-        }
-        notes = typeof llm.notes === "string" ? llm.notes.slice(0, 200) : null;
-        // Source column has a CHECK constraint limited to 'auto'|'user'|'llm-derived'.
-        // Full provenance like "llm-derived:ollama:gemma4:e4b" is preserved in tool
-        // responses and llm_status; here we store the bucket only.
-        source = llm.source.startsWith("llm-derived") ? "llm-derived" : "auto";
+    const llm = enriched.get(prop.name);
+    if (llm) {
+      // Trust strong rules (potentially_large/computed/deprecated) over the
+      // LLM. Only let the LLM upgrade compact/system → richer categories.
+      if (rule === "compact" || rule === "system" || llm.category === rule) {
+        category = PROPERTY_CATEGORIES.includes(llm.category) ? llm.category : rule;
       }
+      notes = typeof llm.notes === "string" ? llm.notes.slice(0, 200) : null;
+      // Source column has a CHECK constraint limited to 'auto'|'user'|'llm-derived'.
+      // Full provenance like "llm-derived:ollama:gemma4:e4b" is preserved in tool
+      // responses and llm_status; here we store the bucket only.
+      source = llm.source.startsWith("llm-derived") ? "llm-derived" : "auto";
     }
 
     return {
       object_type: objectType,
-      property_name: p.name,
+      property_name: prop.name,
       category,
       notes,
       source,
     };
-  };
-
-  const rows = useLLM
-    ? await runWithConcurrency(props, llmConcurrency, classifyOne)
-    : props.map((p) => {
-        const rule = categorizePropertyByRule(p);
-        return {
-          object_type: objectType,
-          property_name: p.name,
-          category: rule,
-          notes: null,
-          source: "auto",
-        };
-      });
+  });
 
   upsertPropertyNotesBatch(rows);
 
@@ -134,6 +162,9 @@ export async function categorizeProperties(
     by_source: bySource,
     llm_used: useLLM,
     llm_concurrency: useLLM ? llmConcurrency : 0,
+    llm_attempted: needsEnrichment.length,
+    llm_succeeded: enriched.size,
+    enrichment_filter: enrichmentFilter ? [...enrichmentFilter] : null,
   };
 }
 

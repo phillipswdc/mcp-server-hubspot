@@ -47,14 +47,21 @@ export function registerPropertyNotesTools(server) {
         .describe(
           "Optional cap on how many properties to categorize. Useful for testing the LLM path on a small subset before committing to a full categorization run (which can be slow at hundreds of properties)."
         ),
+      categories_to_enrich: z
+        .array(z.enum(PROPERTY_CATEGORIES))
+        .optional()
+        .describe(
+          "Restrict LLM enrichment to properties whose RULE-BASED category is in this list. Other properties still get a rule-based category but skip the LLM call entirely (no note generated). Common pattern: pass [\"compact\",\"potentially_large\"] to skip computed/system fields, which are usually self-explanatory by name. Cuts LLM calls roughly in half on a typical HubSpot account."
+        ),
     },
-    async ({ object_type, use_llm, llm_concurrency, limit_props }) => {
+    async ({ object_type, use_llm, llm_concurrency, limit_props, categories_to_enrich }) => {
       try {
         return jsonText(
           await hubspot.categorizeProperties(object_type, {
             useLLM: use_llm,
             llmConcurrency: llm_concurrency,
             limit_props,
+            categories_to_enrich,
           })
         );
       } catch (err) {
