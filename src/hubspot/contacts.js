@@ -8,6 +8,7 @@ import { withRetry } from "./retry.js";
 import { compact } from "./compact.js";
 import { buildSearchRequest, normalizeSearchResponse } from "./_search.js";
 import { auditedUpdate, auditedCreate } from "./_audit.js";
+import { autoCacheLargeValues, maybeCacheResponse } from "./_cache.js";
 import { DEFAULT_CONTACT_PROPERTIES } from "../config/constants.js";
 
 /**
@@ -57,7 +58,13 @@ export async function getContactByEmail(email, properties) {
 export async function searchContacts(input) {
   const req = buildSearchRequest(input, DEFAULT_CONTACT_PROPERTIES);
   const res = await withRetry(() => sdk.crm.contacts.searchApi.doSearch(req));
-  return normalizeSearchResponse(res);
+  const response = normalizeSearchResponse(res);
+  return maybeCacheResponse(response, {
+    useCache: input?.cache === true,
+    tool_name: "search_contacts",
+    source_args: input,
+    object_type: "contacts",
+  });
 }
 
 /**
@@ -67,12 +74,13 @@ export async function searchContacts(input) {
  * @param {{ properties?: string[], limit?: number, after?: string }} [options]
  * @returns {Promise<{ total: number, count: number, next_cursor?: string, results: object[] }>}
  */
-export async function listRecentContacts({ properties, limit, after } = {}) {
+export async function listRecentContacts({ properties, limit, after, cache } = {}) {
   return await searchContacts({
     sorts: [{ propertyName: "lastmodifieddate", direction: "DESCENDING" }],
     properties,
     limit,
     after,
+    cache,
   });
 }
 
@@ -125,7 +133,10 @@ function shapeContact(res) {
   return (
     compact({
       id: res.id,
-      properties: res.properties,
+      properties: autoCacheLargeValues(res.properties, {
+        object_type: "contacts",
+        object_id: res.id,
+      }),
       createdAt: res.createdAt,
       updatedAt: res.updatedAt,
     }) ?? { id: res.id }

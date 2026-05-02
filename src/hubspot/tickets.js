@@ -7,6 +7,7 @@ import { compact } from "./compact.js";
 import { buildSearchRequest, normalizeSearchResponse } from "./_search.js";
 import { listAssociatedObjects } from "./_associations.js";
 import { auditedUpdate, auditedCreate } from "./_audit.js";
+import { autoCacheLargeValues, maybeCacheResponse } from "./_cache.js";
 import { DEFAULT_TICKET_PROPERTIES } from "../config/constants.js";
 
 /**
@@ -33,7 +34,13 @@ export async function getTicketById(ticketId, properties) {
 export async function searchTickets(input) {
   const req = buildSearchRequest(input, DEFAULT_TICKET_PROPERTIES);
   const res = await withRetry(() => sdk.crm.tickets.searchApi.doSearch(req));
-  return normalizeSearchResponse(res);
+  const response = normalizeSearchResponse(res);
+  return maybeCacheResponse(response, {
+    useCache: input?.cache === true,
+    tool_name: "search_tickets",
+    source_args: input,
+    object_type: "tickets",
+  });
 }
 
 /**
@@ -121,7 +128,10 @@ function shapeTicket(res) {
   return (
     compact({
       id: res.id,
-      properties: res.properties,
+      properties: autoCacheLargeValues(res.properties, {
+        object_type: "tickets",
+        object_id: res.id,
+      }),
       createdAt: res.createdAt,
       updatedAt: res.updatedAt,
     }) ?? { id: res.id }

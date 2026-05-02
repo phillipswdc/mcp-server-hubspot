@@ -71,6 +71,37 @@ const DDL = `
     fetched_at INTEGER NOT NULL,
     ttl_seconds INTEGER NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS property_notes (
+    object_type TEXT NOT NULL,
+    property_name TEXT NOT NULL,
+    category TEXT,
+    notes TEXT,
+    source TEXT NOT NULL CHECK (source IN ('auto','user','llm-derived')),
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (object_type, property_name)
+  );
+  CREATE INDEX IF NOT EXISTS idx_pn_category ON property_notes(category);
+  CREATE INDEX IF NOT EXISTS idx_pn_source ON property_notes(source);
+
+  CREATE TABLE IF NOT EXISTS result_cache (
+    cache_id TEXT PRIMARY KEY,
+    cache_type TEXT NOT NULL CHECK (cache_type IN ('result_set','property_value')),
+    tool_name TEXT,
+    source_args TEXT,
+    object_type TEXT,
+    payload TEXT NOT NULL,
+    result_count INTEGER,
+    byte_length INTEGER,
+    preview TEXT,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    environment TEXT NOT NULL,
+    session_id TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_rc_expires ON result_cache(expires_at);
+  CREATE INDEX IF NOT EXISTS idx_rc_session ON result_cache(session_id);
+  CREATE INDEX IF NOT EXISTS idx_rc_type ON result_cache(cache_type);
 `;
 
 /**

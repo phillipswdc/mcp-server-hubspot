@@ -7,6 +7,7 @@ import { withRetry } from "./retry.js";
 import { compact } from "./compact.js";
 import { buildSearchRequest, normalizeSearchResponse } from "./_search.js";
 import { auditedUpdate, auditedCreate } from "./_audit.js";
+import { autoCacheLargeValues, maybeCacheResponse } from "./_cache.js";
 import { DEFAULT_COMPANY_PROPERTIES } from "../config/constants.js";
 
 /**
@@ -57,7 +58,13 @@ export async function getCompanyByDomain(domain, properties) {
 export async function searchCompanies(input) {
   const req = buildSearchRequest(input, DEFAULT_COMPANY_PROPERTIES);
   const res = await withRetry(() => sdk.crm.companies.searchApi.doSearch(req));
-  return normalizeSearchResponse(res);
+  const response = normalizeSearchResponse(res);
+  return maybeCacheResponse(response, {
+    useCache: input?.cache === true,
+    tool_name: "search_companies",
+    source_args: input,
+    object_type: "companies",
+  });
 }
 
 /**
@@ -107,7 +114,10 @@ function shapeCompany(res) {
   return (
     compact({
       id: res.id,
-      properties: res.properties,
+      properties: autoCacheLargeValues(res.properties, {
+        object_type: "companies",
+        object_id: res.id,
+      }),
       createdAt: res.createdAt,
       updatedAt: res.updatedAt,
     }) ?? { id: res.id }

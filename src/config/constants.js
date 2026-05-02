@@ -76,3 +76,32 @@ export const PROPERTY_CACHE_TTL_MS = 5 * 60 * 1000;
 
 /** Default retry attempts for HubSpot 429 responses (rate-limit). */
 export const DEFAULT_RETRY_ATTEMPTS = 3;
+
+/** Allowed values for property_notes.category. */
+export const PROPERTY_CATEGORIES = Object.freeze([
+  "compact",            // small, safe-by-default
+  "potentially_large",  // long text fields, content/notes
+  "computed",           // HubSpot-managed; read-only on writes
+  "deprecated",         // flagged in HubSpot metadata
+  "system",             // hs_* infrastructure fields
+]);
+
+/**
+ * Property name patterns that indicate a likely-large value. Anything matching
+ * is auto-categorized as "potentially_large" unless overridden.
+ */
+export const LARGE_PROPERTY_NAME_PATTERN = /(notes|description|content|body|comments|html)/i;
+
+/**
+ * Auto-cache threshold: any single property value over this many bytes is
+ * stored in result_cache and replaced with a cached_ref handle in the MCP
+ * response, so the bulk data never enters Claude's context unless explicitly
+ * dereferenced via get_cached_value.
+ */
+export const AUTO_CACHE_VALUE_BYTES = 2_000;
+
+/** Default TTL for result_cache rows. 1 hour. */
+export const RESULT_CACHE_TTL_MS = 60 * 60 * 1000;
+
+/** Preview length (chars) for cached values shown alongside the handle. */
+export const CACHE_PREVIEW_CHARS = 200;

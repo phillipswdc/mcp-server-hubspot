@@ -29,6 +29,8 @@ const { registerCompanyTools } = await import("./tools/companies.js");
 const { registerDealTools } = await import("./tools/deals.js");
 const { registerTicketTools } = await import("./tools/tickets.js");
 const { registerAuditTools } = await import("./tools/audit.js");
+const { registerPropertyNotesTools } = await import("./tools/property_notes.js");
+const { registerCacheTools } = await import("./tools/cache.js");
 
 const server = new McpServer({
   name: "hubspot",
@@ -41,6 +43,8 @@ registerCompanyTools(server);
 registerDealTools(server);
 registerTicketTools(server);
 registerAuditTools(server);
+registerPropertyNotesTools(server);
+registerCacheTools(server);
 
 await server.connect(new StdioServerTransport());
 

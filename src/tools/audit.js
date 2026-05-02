@@ -49,6 +49,18 @@ export function registerAuditTools(server) {
         .boolean()
         .optional()
         .describe("If true, exclude rows where the underlying API call failed."),
+      session_id: z
+        .string()
+        .optional()
+        .describe(
+          "Filter to a single server-process session. Use the session_id returned by get_environment to scope to the current session."
+        ),
+      current_session_only: z
+        .boolean()
+        .optional()
+        .describe(
+          "Shorthand: if true, equivalent to passing the current session's session_id. Useful for 'show me what I just did.'"
+        ),
       limit: z
         .number()
         .int()
@@ -67,10 +79,13 @@ export function registerAuditTools(server) {
     },
     async (filters) => {
       try {
-        return jsonText({
-          count: undefined, // filled in below
-          rows: hubspot.listRecentChanges(filters),
-        });
+        const effectiveFilters = { ...filters };
+        if (filters.current_session_only) {
+          effectiveFilters.session_id = hubspot.environment().session_id;
+        }
+        delete effectiveFilters.current_session_only;
+        const rows = hubspot.listRecentChanges(effectiveFilters);
+        return jsonText({ count: rows.length, rows });
       } catch (err) {
         return errorText(err, statusOf(err));
       }
@@ -135,19 +150,34 @@ export function registerAuditTools(server) {
 
   server.tool(
     "prune_audit_log",
-    "Permanently delete audit_log rows older than `older_than_days`. No automatic scheduling — runs only when you call it. Reports how many rows existed past the cutoff and how many were actually deleted.",
+    "Permanently delete audit_log rows. Composable filters — by age, by specific session, or 'all sessions except current' — and at least one filter is required. No automatic scheduling; runs only when invoked.",
     {
       older_than_days: z
         .number()
         .min(1)
-        .describe("Delete audit rows whose timestamp is older than this many days."),
+        .optional()
+        .describe(
+          "Delete audit rows whose timestamp is older than this many days. Combines with session filters."
+        ),
+      session_id: z
+        .string()
+        .optional()
+        .describe(
+          "Delete only rows from this specific session. Mutually exclusive with except_session_id."
+        ),
+      except_current_session: z
+        .boolean()
+        .optional()
+        .describe(
+          "Shorthand: if true, delete all rows EXCEPT the current session's. Use this to clean up old test sessions while keeping current work intact."
+        ),
       confirm: z
         .literal(true)
         .describe(
-          "Must be `true` to actually delete. Acts as a final safety check on top of Claude Desktop's tool approval."
+          "Must be `true` to actually delete. Final safety check on top of Claude Desktop's tool approval."
         ),
     },
-    async ({ older_than_days, confirm }) => {
+    async ({ older_than_days, session_id, except_current_session, confirm }) => {
       try {
         if (confirm !== true) {
           return errorText(
@@ -155,7 +185,16 @@ export function registerAuditTools(server) {
             "confirm-required"
           );
         }
-        return jsonText(hubspot.pruneAuditLog(older_than_days));
+        const except_session_id = except_current_session
+          ? hubspot.environment().session_id
+          : undefined;
+        return jsonText(
+          hubspot.pruneAuditLog({
+            olderThanDays: older_than_days,
+            session_id,
+            except_session_id,
+          })
+        );
       } catch (err) {
         return errorText(err, statusOf(err));
       }

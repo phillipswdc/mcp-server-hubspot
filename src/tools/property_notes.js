@@ -1,0 +1,104 @@
+/**
+ * MCP tool registrations for property categorization + the property_notes
+ * annotation layer.
+ */
+import { z } from "zod";
+import { hubspot } from "../hubspot/index.js";
+import { jsonText, plainText, errorText, statusOf } from "./_shared.js";
+import {
+  SUPPORTED_OBJECT_TYPES,
+  PROPERTY_CATEGORIES,
+} from "../config/constants.js";
+
+/**
+ * Register property-notes MCP tools on a server instance.
+ * @param {import("@modelcontextprotocol/sdk/server/mcp.js").McpServer} server
+ */
+export function registerPropertyNotesTools(server) {
+  server.tool(
+    "categorize_properties",
+    "Walk every property of a HubSpot object type and write a rule-based category (compact / potentially_large / computed / deprecated / system) to the local property_notes table. Returns a count summary by category. Useful before searches or updates so you know which fields are safe to fetch and which are likely to be large.",
+    {
+      object_type: z
+        .enum(SUPPORTED_OBJECT_TYPES)
+        .describe("Which CRM object type to categorize"),
+    },
+    async ({ object_type }) => {
+      try {
+        return jsonText(await hubspot.categorizeProperties(object_type));
+      } catch (err) {
+        return errorText(err, statusOf(err));
+      }
+    }
+  );
+
+  server.tool(
+    "set_property_note",
+    "Manually annotate a property — assign a category and/or free-form notes. User-supplied notes outrank auto-derived ones via COALESCE-on-conflict, so manual annotations persist across `categorize_properties` re-runs. Useful for marking project-specific quirks like 'industry_v2 is what we actually use, not industry'.",
+    {
+      object_type: z
+        .enum(SUPPORTED_OBJECT_TYPES)
+        .describe("Which CRM object type the property belongs to"),
+      property_name: z.string().describe("Internal property name"),
+      category: z
+        .enum(PROPERTY_CATEGORIES)
+        .optional()
+        .describe(
+          "Optional category override. One of: compact, potentially_large, computed, deprecated, system"
+        ),
+      notes: z
+        .string()
+        .optional()
+        .describe("Optional free-form annotation"),
+    },
+    async ({ object_type, property_name, category, notes }) => {
+      try {
+        const row = hubspot.setPropertyNote(object_type, property_name, {
+          category,
+          notes,
+        });
+        return jsonText(row);
+      } catch (err) {
+        return errorText(err, statusOf(err));
+      }
+    }
+  );
+
+  server.tool(
+    "get_property_notes",
+    "Read property annotations for an object type. Without filters, returns all notes for the type. With property_name, returns just that property's note. With category, filters to one category. Pair with list_properties for the canonical schema; this tool returns the editorial layer on top of it.",
+    {
+      object_type: z
+        .enum(SUPPORTED_OBJECT_TYPES)
+        .describe("Which CRM object type to query"),
+      property_name: z
+        .string()
+        .optional()
+        .describe("Optional: fetch the note for a single property"),
+      category: z
+        .enum(PROPERTY_CATEGORIES)
+        .optional()
+        .describe(
+          "Optional: filter results to one category"
+        ),
+    },
+    async ({ object_type, property_name, category }) => {
+      try {
+        const rows = hubspot.getPropertyNotes(object_type, {
+          property_name,
+          category,
+        });
+        if (!rows.length) {
+          return plainText(
+            `No property notes recorded for ${object_type}${
+              property_name ? `/${property_name}` : ""
+            }${category ? ` (category=${category})` : ""}. Run categorize_properties to populate.`
+          );
+        }
+        return jsonText({ count: rows.length, rows });
+      } catch (err) {
+        return errorText(err, statusOf(err));
+      }
+    }
+  );
+}

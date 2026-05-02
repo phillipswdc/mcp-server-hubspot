@@ -42,6 +42,18 @@ import {
   getChangeDetail,
   pruneAuditLog,
 } from "./audit.js";
+import {
+  categorizeProperties,
+  setPropertyNote,
+  getPropertyNotes,
+} from "./property_notes.js";
+import {
+  getCachedValue,
+  queryCache,
+  cacheSummary,
+  listCaches,
+  expireCache,
+} from "./cache.js";
 import { env } from "../config/env.js";
 import { dbPath } from "../db/index.js";
 
@@ -100,4 +112,16 @@ export const hubspot = {
   listRecentChanges,
   getChangeDetail,
   pruneAuditLog,
+
+  // Property categorization + notes
+  categorizeProperties,
+  setPropertyNote,
+  getPropertyNotes,
+
+  // Result cache + auto-cache dereferencing
+  getCachedValue,
+  queryCache,
+  cacheSummary,
+  listCaches,
+  expireCache,
 };

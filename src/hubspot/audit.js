@@ -12,7 +12,7 @@ import {
   getAuditById,
   listRecentAudits,
   markRolledBack,
-  pruneOlderThan,
+  pruneAudit,
 } from "../db/queries/audit.js";
 import { env } from "../config/env.js";
 
@@ -377,21 +377,46 @@ export function getChangeDetail(auditId) {
 }
 
 /**
- * Permanently delete audit rows older than `olderThanDays`. Returns counts
- * for confirmation. No automatic scheduling — this only runs when invoked.
+ * Permanently delete audit rows. Composable filters: by age, by session,
+ * or "everything except current session." At least one filter must be set.
  *
- * @param {number} olderThanDays Must be > 0.
- * @returns {{ before: number, deleted: number, cutoff_iso: string }}
+ * No automatic scheduling — runs only when invoked. Caller already passed
+ * confirm: true at the tool layer.
+ *
+ * @param {object} options
+ * @param {number} [options.olderThanDays] Cutoff in days; positive number
+ * @param {string} [options.session_id] Delete only this session's rows
+ * @param {string} [options.except_session_id] Delete all except this session's rows
+ * @returns {{ before: number, deleted: number, cutoff_iso?: string, session_id?: string, except_session_id?: string }}
  */
-export function pruneAuditLog(olderThanDays) {
-  if (!Number.isFinite(olderThanDays) || olderThanDays <= 0) {
+export function pruneAuditLog({
+  olderThanDays = null,
+  session_id = null,
+  except_session_id = null,
+} = {}) {
+  if (
+    olderThanDays === null &&
+    session_id === null &&
+    except_session_id === null
+  ) {
+    throw new Error(
+      "prune_audit_log requires at least one filter: older_than_days, session_id, or except_session_id"
+    );
+  }
+  if (olderThanDays !== null && (!Number.isFinite(olderThanDays) || olderThanDays <= 0)) {
     throw new Error("older_than_days must be a positive number");
   }
-  const cutoffMs = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
-  const counts = pruneOlderThan(cutoffMs);
+
+  const cutoffMs =
+    olderThanDays !== null
+      ? Date.now() - olderThanDays * 24 * 60 * 60 * 1000
+      : null;
+  const counts = pruneAudit({ cutoffMs, session_id, except_session_id });
   return {
     ...counts,
-    cutoff_iso: new Date(cutoffMs).toISOString(),
+    ...(cutoffMs !== null ? { cutoff_iso: new Date(cutoffMs).toISOString() } : {}),
+    ...(session_id !== null ? { session_id } : {}),
+    ...(except_session_id !== null ? { except_session_id } : {}),
   };
 }
 

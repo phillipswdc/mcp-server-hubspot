@@ -27,13 +27,14 @@ const SELECT_RECENT = db.prepare(`
 `);
 
 const SELECT_RECENT_FILTERED = db.prepare(`
-  SELECT id, timestamp, environment, tool_name, object_type, object_id,
+  SELECT id, timestamp, environment, session_id, tool_name, object_type, object_id,
          operation, success, rolled_back, error
   FROM audit_log
   WHERE (@object_type IS NULL OR object_type = @object_type)
     AND (@object_id IS NULL OR object_id = @object_id)
     AND (@only_unrolled = 0 OR rolled_back = 0)
     AND (@only_successful = 0 OR success = 1)
+    AND (@session_id IS NULL OR session_id = @session_id)
   ORDER BY id DESC
   LIMIT @limit OFFSET @offset
 `);
@@ -44,14 +45,21 @@ const MARK_ROLLED_BACK = db.prepare(`
   WHERE id = ? AND rolled_back = 0
 `);
 
-const DELETE_OLDER_THAN = db.prepare(`
+// Composable prune. Each WHERE clause becomes a no-op when the corresponding
+// param is null, so the same statement handles age-only, session-only,
+// except-session, and combinations.
+const DELETE_FILTERED = db.prepare(`
   DELETE FROM audit_log
-  WHERE timestamp < ?
+  WHERE (@cutoff_ms IS NULL OR timestamp < @cutoff_ms)
+    AND (@session_id IS NULL OR session_id = @session_id)
+    AND (@except_session_id IS NULL OR session_id != @except_session_id OR session_id IS NULL)
 `);
 
-const COUNT_OLDER_THAN = db.prepare(`
+const COUNT_FILTERED = db.prepare(`
   SELECT COUNT(*) as n FROM audit_log
-  WHERE timestamp < ?
+  WHERE (@cutoff_ms IS NULL OR timestamp < @cutoff_ms)
+    AND (@session_id IS NULL OR session_id = @session_id)
+    AND (@except_session_id IS NULL OR session_id != @except_session_id OR session_id IS NULL)
 `);
 
 /**
@@ -114,7 +122,7 @@ export function getAuditById(id) {
 /**
  * List recent audit rows (newest first), with optional filters.
  *
- * @param {{ object_type?: string, object_id?: string, only_unrolled?: boolean, only_successful?: boolean, limit?: number, offset?: number }} [filters]
+ * @param {{ object_type?: string, object_id?: string, only_unrolled?: boolean, only_successful?: boolean, session_id?: string, limit?: number, offset?: number }} [filters]
  * @returns {object[]} Lightweight row summaries (full payloads accessible via getAuditById).
  */
 export function listRecentAudits(filters = {}) {
@@ -123,6 +131,7 @@ export function listRecentAudits(filters = {}) {
     object_id = null,
     only_unrolled = false,
     only_successful = false,
+    session_id = null,
     limit = 25,
     offset = 0,
   } = filters;
@@ -130,7 +139,8 @@ export function listRecentAudits(filters = {}) {
     object_type === null &&
     object_id === null &&
     !only_unrolled &&
-    !only_successful
+    !only_successful &&
+    session_id === null
   ) {
     return SELECT_RECENT.all(limit, offset);
   }
@@ -139,6 +149,7 @@ export function listRecentAudits(filters = {}) {
     object_id,
     only_unrolled: only_unrolled ? 1 : 0,
     only_successful: only_successful ? 1 : 0,
+    session_id,
     limit,
     offset,
   });
@@ -158,15 +169,26 @@ export function markRolledBack(originalId, rollbackAuditId) {
 }
 
 /**
- * Permanently delete audit rows older than `cutoffMs`. No automatic
- * scheduling — exposed only via a deliberate prune_audit_log tool call.
+ * Permanently delete audit rows matching the given filters. At least one
+ * filter must be set; calling with all filters null is a guarded no-op (so
+ * we can never accidentally wipe the entire log via a missing argument).
  *
- * @param {number} cutoffMs Unix-ms; rows with timestamp < cutoffMs are deleted
+ * @param {object} filters
+ * @param {number|null} [filters.cutoffMs] Delete rows with timestamp < cutoffMs
+ * @param {string|null} [filters.session_id] Delete only rows from this session
+ * @param {string|null} [filters.except_session_id] Delete all rows EXCEPT this session
  * @returns {{ before: number, deleted: number }}
  */
-export function pruneOlderThan(cutoffMs) {
-  const before = Number(COUNT_OLDER_THAN.get(cutoffMs)?.n ?? 0);
-  const info = DELETE_OLDER_THAN.run(cutoffMs);
+export function pruneAudit({ cutoffMs = null, session_id = null, except_session_id = null } = {}) {
+  if (cutoffMs === null && session_id === null && except_session_id === null) {
+    return { before: 0, deleted: 0 };
+  }
+  if (session_id !== null && except_session_id !== null) {
+    throw new Error("Cannot combine session_id with except_session_id — use one or the other");
+  }
+  const params = { cutoff_ms: cutoffMs, session_id, except_session_id };
+  const before = Number(COUNT_FILTERED.get(params)?.n ?? 0);
+  const info = DELETE_FILTERED.run(params);
   return { before, deleted: info.changes };
 }
 

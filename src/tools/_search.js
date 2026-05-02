@@ -111,5 +111,11 @@ export function searchInputShape(propertiesDescription) {
       .string()
       .optional()
       .describe("Pagination cursor returned as `next_cursor` from a prior call."),
+    cache: z
+      .boolean()
+      .optional()
+      .describe(
+        "If true, store the full result-set in result_cache and return a small handle (cache_id + sample) instead of the full payload. Use for bulk exploration where you'll drill in via query_cache, OR when you don't want a large response in Claude's context."
+      ),
   };
 }
