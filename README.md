@@ -36,13 +36,17 @@ Supported CRM object types:
 
 Current mutation support:
 
+- `create_contact`
+- `create_company`
+- `create_deal`
+- `create_ticket`
 - `update_contact`
 - `update_company`
 - `update_deal`
 - `update_ticket`
-- `rollback_change`
+- `rollback_change` (handles both create and update reversal)
 
-This repo is currently optimized for read operations plus safe property updates. It is not a full CRUD surface.
+This repo provides safe, audited create and update operations across all four supported object types. Whole-record deletes are intentionally not exposed — the closest equivalent is `rollback_change` reverting a known create, which archives the entity (HubSpot's soft delete; restorable via the recycle bin).
 
 ## Architecture
 
@@ -143,6 +147,7 @@ If your client supports setting environment variables per server, you can supply
 - `get_contact_by_email`
 - `search_contacts`
 - `list_recent_contacts`
+- `create_contact`
 - `update_contact`
 
 ### Companies
@@ -150,6 +155,7 @@ If your client supports setting environment variables per server, you can supply
 - `get_company_by_id`
 - `get_company_by_domain`
 - `search_companies`
+- `create_company`
 - `update_company`
 
 ### Deals
@@ -158,6 +164,7 @@ If your client supports setting environment variables per server, you can supply
 - `search_deals`
 - `list_deals_for_company`
 - `list_deals_for_contact`
+- `create_deal`
 - `update_deal`
 
 ### Tickets
@@ -166,6 +173,7 @@ If your client supports setting environment variables per server, you can supply
 - `search_tickets`
 - `list_tickets_for_contact`
 - `list_tickets_for_company`
+- `create_ticket`
 - `update_ticket`
 
 Ticket responses omit `content` by default to keep payload size sane. Request it explicitly if you need the body.
@@ -278,6 +286,25 @@ Update tools return:
     },
     "updatedAt": "2026-05-02T12:34:56.000Z"
   }
+}
+```
+
+Create tools return:
+
+```json
+{
+  "audit_id": 43,
+  "created": {
+    "id": "789012",
+    "properties": {
+      "email": "new@example.com",
+      "firstname": "New",
+      "lastname": "Contact"
+    },
+    "createdAt": "2026-05-02T12:34:56.000Z",
+    "updatedAt": "2026-05-02T12:34:56.000Z"
+  },
+  "rollback_hint": "Use rollback_change(audit_id=43) to archive this entity."
 }
 ```
 
