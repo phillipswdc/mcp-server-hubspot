@@ -54,6 +54,28 @@ import {
   listCaches,
   expireCache,
 } from "./cache.js";
+import {
+  getOrderById,
+  searchOrders,
+  createOrder,
+  updateOrder,
+  listOrdersForContact,
+  listOrdersForCompany,
+  listOrdersForDeal,
+} from "./orders.js";
+import {
+  getLineItemById,
+  searchLineItems,
+  createLineItem,
+  updateLineItem,
+  listLineItemsForDeal,
+  listLineItemsForOrder,
+} from "./line_items.js";
+import {
+  getProductById,
+  searchProducts,
+  listRecentProducts,
+} from "./products.js";
 import { env } from "../config/env.js";
 import { dbPath } from "../db/index.js";
 
@@ -124,4 +146,26 @@ export const hubspot = {
   cacheSummary,
   listCaches,
   expireCache,
+
+  // Commerce: orders
+  getOrderById,
+  searchOrders,
+  createOrder,
+  updateOrder,
+  listOrdersForContact,
+  listOrdersForCompany,
+  listOrdersForDeal,
+
+  // Commerce: line items
+  getLineItemById,
+  searchLineItems,
+  createLineItem,
+  updateLineItem,
+  listLineItemsForDeal,
+  listLineItemsForOrder,
+
+  // Commerce: products (read-only)
+  getProductById,
+  searchProducts,
+  listRecentProducts,
 };

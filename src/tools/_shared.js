@@ -63,10 +63,37 @@ export function plainText(text) {
  * Wrap an error as an MCP error response. Includes HTTP status when available
  * so the model can react differently to e.g. 404 vs 500.
  *
+ * Special-cases tier-gated commerce features: when an error includes a
+ * `featureName` hint and HubSpot returned 403/404, produce a clear "feature
+ * not enabled on your tier" message with guidance, instead of the raw
+ * HubSpot error.
+ *
  * @param {unknown} err
  * @param {number|string} [status]
+ * @param {string} [featureName] e.g. "orders", "subscriptions" — triggers
+ *   tier-aware rephrasing on 403/404
  */
-export function errorText(err, status) {
+export function errorText(err, status, featureName) {
+  const httpStatus = Number(status);
+  if (
+    featureName &&
+    (httpStatus === 403 || httpStatus === 404)
+  ) {
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            `${featureName} are not available on this HubSpot account ` +
+            `(HubSpot returned ${httpStatus}). This feature typically requires ` +
+            `Commerce Hub or an equivalent tier. Verify enablement in HubSpot ` +
+            `(left nav → Commerce), or run check_feature_availability to see ` +
+            `which commerce objects are accessible with your current token.`,
+        },
+      ],
+      isError: true,
+    };
+  }
   return {
     content: [
       {

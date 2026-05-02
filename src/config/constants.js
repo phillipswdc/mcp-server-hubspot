@@ -3,12 +3,30 @@
  * supported object types) happen in one place rather than scattered across modules.
  */
 
-/** HubSpot CRM object types this server currently supports. */
+/**
+ * HubSpot CRM object types this server currently supports.
+ *
+ * Some entries here may be tier-gated by HubSpot (e.g. `orders` typically
+ * requires Commerce Hub). Tools register regardless of tier; calls that hit
+ * a feature the user's account doesn't have produce a clean tier-aware error
+ * via the errorText helper. Run `check_feature_availability` to see what's
+ * actually accessible with your current token.
+ */
 export const SUPPORTED_OBJECT_TYPES = Object.freeze([
   "contacts",
   "companies",
   "deals",
   "tickets",
+  "orders",
+  "line_items",
+  "products",
+]);
+
+/** Object types that require Commerce Hub or equivalent tier. */
+export const COMMERCE_OBJECT_TYPES = Object.freeze([
+  "orders",
+  "line_items",
+  "products",
 ]);
 
 /** Default contact properties returned when the caller doesn't specify a list. */
@@ -56,6 +74,47 @@ export const DEFAULT_TICKET_PROPERTIES = Object.freeze([
   "hs_ticket_category",
   "hubspot_owner_id",
   "source_type",
+]);
+
+/** Default order properties. Commerce Hub object. */
+export const DEFAULT_ORDER_PROPERTIES = Object.freeze([
+  "hs_order_name",
+  "hs_order_status",
+  "hs_currency_code",
+  "hs_total_price",
+  "hs_subtotal_price",
+  "hs_tax_amount",
+  "hs_shipping_amount",
+  "hs_external_order_id",
+  "hubspot_owner_id",
+  "createdate",
+  "hs_lastmodifieddate",
+]);
+
+/** Default line item properties. Commerce Hub object — children of orders/deals/quotes. */
+export const DEFAULT_LINE_ITEM_PROPERTIES = Object.freeze([
+  "name",
+  "quantity",
+  "price",
+  "amount",
+  "hs_sku",
+  "hs_product_id",
+  "hs_recurring_billing_period",
+  "hs_billing_period",
+  "createdate",
+  "hs_lastmodifieddate",
+]);
+
+/** Default product properties. Catalog records. */
+export const DEFAULT_PRODUCT_PROPERTIES = Object.freeze([
+  "name",
+  "description",
+  "price",
+  "hs_sku",
+  "hs_cost_of_goods_sold",
+  "hs_recurring_billing_period",
+  "createdate",
+  "hs_lastmodifieddate",
 ]);
 
 /** Maximum results per page across search/list tools. Keeps token cost bounded. */
