@@ -1,7 +1,7 @@
 {
-  "name": "hubspot-mcp",
+  "name": "mcp-server-hubspot",
   "version": "0.1.0",
-  "description": "HubSpot MCP server for Claude Desktop",
+  "description": "MCP server for HubSpot CRM with audited mutations and rollback",
   "type": "module",
   "main": "src/index.js",
   "scripts": {
