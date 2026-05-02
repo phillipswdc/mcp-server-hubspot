@@ -35,6 +35,8 @@ const { registerLLMTools } = await import("./tools/llm.js");
 const { registerOrderTools } = await import("./tools/orders.js");
 const { registerLineItemTools } = await import("./tools/line_items.js");
 const { registerProductTools } = await import("./tools/products.js");
+const { registerQuoteTools } = await import("./tools/quotes.js");
+const { registerCommerceReadTools } = await import("./tools/commerce_reads.js");
 const { registerFeatureAvailabilityTools } = await import("./tools/feature_availability.js");
 
 const server = new McpServer({
@@ -54,6 +56,8 @@ registerLLMTools(server);
 registerOrderTools(server);
 registerLineItemTools(server);
 registerProductTools(server);
+registerQuoteTools(server);
+registerCommerceReadTools(server);
 registerFeatureAvailabilityTools(server);
 
 await server.connect(new StdioServerTransport());

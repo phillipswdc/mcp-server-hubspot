@@ -97,6 +97,106 @@ export function registerPropertyTools(server) {
       }
     }
   );
+
+  server.tool(
+    "create_property",
+    "Define a new custom property on a HubSpot object type. Records the creation as an audit_log row. Note: rollback_change does NOT yet support property mutations — to undo a created property, archive it manually in HubSpot UI (Settings → Properties), or you can delete it via direct HubSpot API. The audit log captures the full definition for forensic recovery.",
+    {
+      object_type: objectTypeSchema,
+      definition: z
+        .object({
+          name: z
+            .string()
+            .min(1)
+            .describe(
+              "Internal name (lowercase, underscores, no spaces, e.g. 'my_custom_field')"
+            ),
+          label: z.string().min(1).describe("Display label shown in HubSpot UI"),
+          type: z
+            .enum([
+              "string",
+              "number",
+              "date",
+              "datetime",
+              "enumeration",
+              "bool",
+            ])
+            .describe("Data type"),
+          fieldType: z
+            .enum([
+              "text",
+              "textarea",
+              "number",
+              "date",
+              "select",
+              "radio",
+              "checkbox",
+              "booleancheckbox",
+              "calculation_equation",
+              "phonenumber",
+              "html",
+              "file",
+            ])
+            .describe(
+              "UI input style. For type=enumeration use 'select', 'radio', or 'checkbox'."
+            ),
+          groupName: z
+            .string()
+            .describe(
+              "Property group name (e.g. 'contactinformation'). Discover existing groups by inspecting other properties."
+            ),
+          description: z.string().optional().describe("Help text for HubSpot UI"),
+          options: z
+            .array(
+              z.object({
+                label: z.string(),
+                value: z.string(),
+                description: z.string().optional(),
+                displayOrder: z.number().int().optional(),
+                hidden: z.boolean().optional(),
+              })
+            )
+            .optional()
+            .describe(
+              "Required when type=enumeration. Each option needs label + value."
+            ),
+          formField: z
+            .boolean()
+            .optional()
+            .describe("Whether this property can appear on HubSpot forms"),
+          hasUniqueValue: z
+            .boolean()
+            .optional()
+            .describe("Enforce uniqueness across records of this object type"),
+          hidden: z
+            .boolean()
+            .optional()
+            .describe("Hide from UI but keep usable via API"),
+        })
+        .describe("HubSpot property definition"),
+      confirm_production: z
+        .boolean()
+        .optional()
+        .describe(
+          "Required when HUBSPOT_ENV=production. Property creation is a schema change — defense-in-depth check on top of Claude Desktop's per-call approval."
+        ),
+    },
+    async ({ object_type, definition, confirm_production }) => {
+      try {
+        const out = await hubspot.createProperty(object_type, definition, {
+          confirmProduction: confirm_production === true,
+        });
+        return jsonText({
+          audit_id: out.audit_id,
+          created: out.result,
+          rollback_hint:
+            "rollback_change does not yet support property mutations. To undo, archive the property manually in HubSpot UI (Settings → Properties).",
+        });
+      } catch (err) {
+        return errorText(err, statusOf(err));
+      }
+    }
+  );
 }
 
 /**

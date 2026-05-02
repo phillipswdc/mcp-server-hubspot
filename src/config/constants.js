@@ -20,6 +20,11 @@ export const SUPPORTED_OBJECT_TYPES = Object.freeze([
   "orders",
   "line_items",
   "products",
+  "quotes",
+  "invoices",
+  "subscriptions",
+  "payments",
+  "carts",
 ]);
 
 /** Object types that require Commerce Hub or equivalent tier. */
@@ -27,6 +32,11 @@ export const COMMERCE_OBJECT_TYPES = Object.freeze([
   "orders",
   "line_items",
   "products",
+  "quotes",
+  "invoices",
+  "subscriptions",
+  "payments",
+  "carts",
 ]);
 
 /** Default contact properties returned when the caller doesn't specify a list. */
@@ -113,6 +123,66 @@ export const DEFAULT_PRODUCT_PROPERTIES = Object.freeze([
   "hs_sku",
   "hs_cost_of_goods_sold",
   "hs_recurring_billing_period",
+  "createdate",
+  "hs_lastmodifieddate",
+]);
+
+/** Default quote properties. Pre-sale documents attached to deals. */
+export const DEFAULT_QUOTE_PROPERTIES = Object.freeze([
+  "hs_title",
+  "hs_status",
+  "hs_quote_amount",
+  "hs_currency",
+  "hs_expiration_date",
+  "hs_url",
+  "hubspot_owner_id",
+  "createdate",
+  "hs_lastmodifieddate",
+]);
+
+/** Default invoice properties. Billed amounts (Commerce Hub). */
+export const DEFAULT_INVOICE_PROPERTIES = Object.freeze([
+  "hs_invoice_status",
+  "hs_amount_billed",
+  "hs_currency_code",
+  "hs_due_date",
+  "hs_external_invoice_id",
+  "hubspot_owner_id",
+  "createdate",
+  "hs_lastmodifieddate",
+]);
+
+/** Default subscription properties. Recurring revenue records (Commerce Hub). */
+export const DEFAULT_SUBSCRIPTION_PROPERTIES = Object.freeze([
+  "hs_subscription_name",
+  "hs_status",
+  "hs_billing_frequency",
+  "hs_total_value",
+  "hs_currency_code",
+  "hs_start_date",
+  "hubspot_owner_id",
+  "createdate",
+  "hs_lastmodifieddate",
+]);
+
+/** Default payment properties. Payment records (Commerce Hub). */
+export const DEFAULT_PAYMENT_PROPERTIES = Object.freeze([
+  "hs_amount",
+  "hs_currency_code",
+  "hs_payment_status",
+  "hs_payment_method",
+  "hs_payment_date",
+  "hubspot_owner_id",
+  "createdate",
+  "hs_lastmodifieddate",
+]);
+
+/** Default cart properties. Shopping cart state (Commerce Hub). */
+export const DEFAULT_CART_PROPERTIES = Object.freeze([
+  "hs_external_cart_id",
+  "hs_cart_status",
+  "hs_total_value",
+  "hs_currency_code",
   "createdate",
   "hs_lastmodifieddate",
 ]);

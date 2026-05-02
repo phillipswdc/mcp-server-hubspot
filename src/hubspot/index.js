@@ -12,7 +12,7 @@ import {
   updateContact,
   createContact,
 } from "./contacts.js";
-import { listProperties, getProperty } from "./properties.js";
+import { listProperties, getProperty, createProperty } from "./properties.js";
 import {
   getCompanyById,
   getCompanyByDomain,
@@ -76,6 +76,36 @@ import {
   searchProducts,
   listRecentProducts,
 } from "./products.js";
+import {
+  getQuoteById,
+  searchQuotes,
+  listQuotesForContact,
+  listQuotesForCompany,
+  listQuotesForDeal,
+} from "./quotes.js";
+import {
+  getInvoiceById,
+  searchInvoices,
+  listInvoicesForContact,
+  listInvoicesForCompany,
+} from "./invoices.js";
+import {
+  getSubscriptionById,
+  searchSubscriptions,
+  listSubscriptionsForContact,
+  listSubscriptionsForCompany,
+} from "./subscriptions.js";
+import {
+  getPaymentById,
+  searchPayments,
+  listPaymentsForContact,
+  listPaymentsForCompany,
+} from "./payments.js";
+import {
+  getCartById,
+  searchCarts,
+  listCartsForContact,
+} from "./carts.js";
 import { env } from "../config/env.js";
 import { dbPath } from "../db/index.js";
 
@@ -94,9 +124,10 @@ export const hubspot = {
     started_at_iso: new Date(env.startedAt).toISOString(),
   }),
 
-  // Property introspection
+  // Property introspection + creation
   listProperties,
   getProperty,
+  createProperty,
 
   // Contacts
   getContactById,
@@ -168,4 +199,34 @@ export const hubspot = {
   getProductById,
   searchProducts,
   listRecentProducts,
+
+  // Commerce: quotes (read-only)
+  getQuoteById,
+  searchQuotes,
+  listQuotesForContact,
+  listQuotesForCompany,
+  listQuotesForDeal,
+
+  // Commerce: invoices (read-only)
+  getInvoiceById,
+  searchInvoices,
+  listInvoicesForContact,
+  listInvoicesForCompany,
+
+  // Commerce: subscriptions (read-only)
+  getSubscriptionById,
+  searchSubscriptions,
+  listSubscriptionsForContact,
+  listSubscriptionsForCompany,
+
+  // Commerce: payments (read-only)
+  getPaymentById,
+  searchPayments,
+  listPaymentsForContact,
+  listPaymentsForCompany,
+
+  // Commerce: carts (read-only)
+  getCartById,
+  searchCarts,
+  listCartsForContact,
 };

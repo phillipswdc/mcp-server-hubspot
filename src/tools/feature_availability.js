@@ -16,6 +16,11 @@ const PROBES = {
   orders: () => sdk.crm.objects.basicApi.getPage("orders", 1),
   line_items: () => sdk.crm.lineItems.basicApi.getPage(1),
   products: () => sdk.crm.products.basicApi.getPage(1),
+  quotes: () => sdk.crm.quotes.basicApi.getPage(1),
+  invoices: () => sdk.crm.objects.basicApi.getPage("invoices", 1),
+  subscriptions: () => sdk.crm.objects.basicApi.getPage("subscriptions", 1),
+  payments: () => sdk.crm.objects.basicApi.getPage("payments", 1),
+  carts: () => sdk.crm.objects.basicApi.getPage("carts", 1),
 };
 
 /**
