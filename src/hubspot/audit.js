@@ -79,10 +79,15 @@ export async function rollbackChange(originalAuditId, options = {}) {
       `Audit row ${originalAuditId} has no recorded args.properties — cannot determine what to roll back`
     );
   }
+  // HubSpot quirk: passing `null` for a property is treated as "leave unchanged"
+  // (silently ignored). To CLEAR a value back to unset, we must send "" (empty
+  // string). This applies across property types (enumerations, strings, numbers,
+  // dates) — empty string is HubSpot's universal "clear" sentinel.
   const propsToWrite = {};
   for (const k of keysToRollback) {
-    // null clears the value when the original was unset/null
-    propsToWrite[k] = oldProps[k] ?? null;
+    const oldVal = oldProps[k];
+    propsToWrite[k] =
+      oldVal === null || oldVal === undefined ? "" : oldVal;
   }
 
   // Drift detection: fetch the current state of the keys we're about to revert
@@ -133,6 +138,32 @@ export async function rollbackChange(originalAuditId, options = {}) {
     rollbackAuditId: Number(originalAuditId),
   });
 
+  // Verify the write actually took effect. HubSpot can accept the request
+  // (HTTP 200) yet leave fields unchanged for various reasons — silent
+  // mismatches are the worst class of bug. If anything we tried to write
+  // didn't land, refuse to mark the original rolled_back so the user knows.
+  const actualNewProps = result?.properties ?? {};
+  const writeMismatches = [];
+  for (const [k, expectedVal] of Object.entries(propsToWrite)) {
+    const actualVal = actualNewProps[k];
+    if (!valuesEffectivelyEqual(expectedVal, actualVal)) {
+      writeMismatches.push({ field: k, expected: expectedVal, actual: actualVal });
+    }
+  }
+  if (writeMismatches.length) {
+    throw new Error(
+      `Rollback write was accepted by HubSpot but did not take effect for ${writeMismatches.length} field(s):\n` +
+        writeMismatches
+          .map(
+            (m) =>
+              `  - ${m.field}: tried to write ${JSON.stringify(m.expected)}, value remains ${JSON.stringify(m.actual)}`
+          )
+          .join("\n") +
+        `\n\nAudit row ${audit_id} records the attempt; original audit_id ${originalAuditId} remains marked NOT rolled back. ` +
+        `This usually means HubSpot rejected a value type silently or the property has a workflow blocking the change.`
+    );
+  }
+
   markRolledBack(Number(originalAuditId), audit_id);
 
   return {
@@ -142,6 +173,20 @@ export async function rollbackChange(originalAuditId, options = {}) {
     result_id: result?.id,
     ...(drift.length ? { drift_overridden: drift } : {}),
   };
+}
+
+/**
+ * Compare two HubSpot property values for "effective equality."
+ * Treats null, undefined, and empty string as the same (HubSpot's "cleared"
+ * state). Otherwise compares as strings (HubSpot serializes everything to
+ * strings on the wire).
+ */
+function valuesEffectivelyEqual(a, b) {
+  const aEmpty = a === null || a === undefined || a === "";
+  const bEmpty = b === null || b === undefined || b === "";
+  if (aEmpty && bEmpty) return true;
+  if (aEmpty !== bEmpty) return false;
+  return String(a) === String(b);
 }
 
 /**
