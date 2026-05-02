@@ -29,24 +29,31 @@ This server is designed around a few hard rules:
 
 Supported CRM object types:
 
-- `contacts`
-- `companies`
-- `deals`
-- `tickets`
+**Standard CRM:**
+- `contacts`, `companies`, `deals`, `tickets`
+
+**Commerce (typically requires Commerce Hub):**
+- `orders`, `line_items`, `products`, `quotes`, `invoices`, `subscriptions`, `payments`, `carts`
+
+Run `check_feature_availability` to see which commerce types your HubSpot account actually has access to. Tools register regardless of tier; tier-gated calls return a clean "not enabled on this account" error rather than a raw HubSpot 403.
 
 Current mutation support:
 
-- `create_contact`
-- `create_company`
-- `create_deal`
-- `create_ticket`
-- `update_contact`
-- `update_company`
-- `update_deal`
-- `update_ticket`
-- `rollback_change` (handles both create and update reversal)
+**Create / update (audited, rollback-aware):**
+- `create_contact` / `update_contact`
+- `create_company` / `update_company`
+- `create_deal` / `update_deal`
+- `create_ticket` / `update_ticket`
+- `create_order` / `update_order`
+- `create_line_item` / `update_line_item`
 
-This repo provides safe, audited create and update operations across all four supported object types. Whole-record deletes are intentionally not exposed — the closest equivalent is `rollback_change` reverting a known create, which archives the entity (HubSpot's soft delete; restorable via the recycle bin).
+**Schema mutation (audited, manual-rollback for now):**
+- `create_property` — define new custom properties on any supported object type. Auto-injects `[Yes:true, No:false]` options for `type=bool` so callers don't have to know HubSpot's quirk.
+
+**Reversal:**
+- `rollback_change` — reverses a prior update (writes captured `old_values` back) or a prior create (archives the entity). Drift detection refuses to silently overwrite external changes.
+
+Whole-record delete tools are intentionally not exposed. The closest equivalent is `rollback_change` reverting a known create, which archives the entity via HubSpot's soft delete (restorable from the recycle bin).
 
 ## Architecture
 
@@ -144,7 +151,7 @@ If your client supports setting environment variables per server, you can supply
 
 ## Tool Catalog
 
-### Schema Discovery
+### Schema Discovery and Mutation
 
 - `list_object_types`
   Returns supported object types.
@@ -152,6 +159,8 @@ If your client supports setting environment variables per server, you can supply
   Lists compact property definitions for an object type. Cached for 5 minutes. Useful before search or update operations.
 - `get_property`
   Returns the full schema for one property, including enumeration options.
+- `create_property`
+  Define a new custom property on a HubSpot object type. Audited; auto-injects standard `[Yes:true, No:false]` options for `type=bool` so callers don't have to know HubSpot's quirk. Note: rollback for property mutations is not yet supported — use HubSpot UI to archive if needed.
 
 ### Contacts
 
@@ -189,6 +198,46 @@ If your client supports setting environment variables per server, you can supply
 - `update_ticket`
 
 Ticket responses omit `content` by default to keep payload size sane. Request it explicitly if you need the body.
+
+### Orders (Commerce Hub)
+
+- `get_order_by_id`
+- `search_orders`
+- `list_orders_for_contact`
+- `list_orders_for_company`
+- `list_orders_for_deal`
+- `create_order`
+- `update_order`
+
+### Line Items (Commerce Hub)
+
+Line items are children of orders, deals, and quotes — they represent the products/services on a transaction.
+
+- `get_line_item_by_id`
+- `search_line_items`
+- `list_line_items_for_deal`
+- `list_line_items_for_order`
+- `create_line_item`
+- `update_line_item`
+
+### Products (Commerce Hub, read-only)
+
+- `get_product_by_id`
+- `search_products`
+- `list_recent_products`
+
+Catalog mutations belong in HubSpot UI or a separate catalog system, so creates and updates are intentionally not exposed.
+
+### Quotes, Invoices, Subscriptions, Payments, Carts (Commerce Hub, read-only)
+
+Each of these has the same pattern: `get_<type>_by_id`, `search_<type>s`, and `list_<type>s_for_{contact,company,deal}` (where the parent association makes sense). They're read-only because each is typically created by an external system (HubSpot's quote builder, accounting integrations, payment processors, ecommerce front-ends).
+
+### Tier Awareness
+
+- `check_feature_availability`
+  Probes each tier-gated commerce object once and reports which are accessible with your current HubSpot token. Useful right after setup, or when a tool returns a tier-related error.
+
+When a commerce tool is called against an account that doesn't have Commerce Hub, the response is a clean tier-aware message ("Orders are not available on this HubSpot account…") instead of a raw HubSpot 403.
 
 ### Environment, Audit, Rollback
 
