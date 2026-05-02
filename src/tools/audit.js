@@ -100,13 +100,19 @@ export function registerAuditTools(server) {
 
   server.tool(
     "rollback_change",
-    "Reverse a previously-recorded UPDATE by writing the captured old_values back to the same object. Records a NEW audit_log row for the rollback action, then marks the original row as rolled_back. Refuses to roll back creates (Phase 3a limitation), already-rolled-back rows, failed mutations, or rows from a different environment than the current one.",
+    "Reverse a previously-recorded UPDATE by writing the captured old_values back to the same object. Records a NEW audit_log row for the rollback action, then marks the original row as rolled_back. Refuses to roll back creates (Phase 3a limitation), already-rolled-back rows, failed mutations, or rows from a different environment than the current one. By default also refuses if any of the affected fields was changed externally since the original update — use force: true to override that drift check.",
     {
       audit_id: z
         .number()
         .int()
         .min(1)
         .describe("ID of the audit_log row to reverse."),
+      force: z
+        .boolean()
+        .optional()
+        .describe(
+          "Override drift detection. Set true ONLY when you have inspected the drift report and explicitly want to overwrite external changes. Without this, rollback refuses if any affected field was modified outside this server since the original update."
+        ),
       confirm_production: z
         .boolean()
         .optional()
@@ -114,10 +120,11 @@ export function registerAuditTools(server) {
           "Required when HUBSPOT_ENV=production. The rollback writes to the same account the original change touched."
         ),
     },
-    async ({ audit_id, confirm_production }) => {
+    async ({ audit_id, force, confirm_production }) => {
       try {
         const out = await hubspot.rollbackChange(audit_id, {
           confirmProduction: confirm_production === true,
+          force: force === true,
         });
         return jsonText(out);
       } catch (err) {

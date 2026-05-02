@@ -27,6 +27,10 @@ import { withRetry } from "./retry.js";
  *   current state (or null for a fresh create). Called once before `perform`.
  * @property {() => Promise<object>} perform Executes the mutation; resolves to
  *   the new state of the entity (the SDK's SimplePublicObject shape).
+ * @property {string[]} [filterCapturedKeys] When provided, the stored
+ *   old_values.properties and new_values.properties are filtered to only
+ *   these keys. Keeps audit rows lean — captures the user's explicit intent
+ *   without noisy auto-included or default fields.
  * @property {boolean} [requireProductionConfirm=true] When false, skip the
  *   confirm gate — used internally by rollback (the gate runs at tool level instead).
  * @property {boolean} [confirmProduction=false] Caller-supplied confirm flag;
@@ -48,6 +52,7 @@ export async function auditedMutation({
   args,
   fetchExisting,
   perform,
+  filterCapturedKeys = null,
   requireProductionConfirm = true,
   confirmProduction = false,
   rollbackAuditId = null,
@@ -56,7 +61,7 @@ export async function auditedMutation({
     throw productionConfirmRequired(toolName);
   }
 
-  const old_values = await safeFetch(fetchExisting);
+  const fullOld = await safeFetch(fetchExisting);
 
   let result = null;
   let error = null;
@@ -69,7 +74,14 @@ export async function auditedMutation({
     error = err;
   }
 
-  const new_values = success ? extractValues(result) : null;
+  const fullNew = success ? extractValues(result) : null;
+
+  // Filter captured properties to the user's explicit intent when requested,
+  // so audit rows stay focused on what was actually being changed (not
+  // auto-included read-only fields or default-property captures).
+  const old_values = applyKeyFilter(fullOld, filterCapturedKeys);
+  const new_values = applyKeyFilter(fullNew, filterCapturedKeys);
+
   const changed_fields =
     operation === "update" && old_values && new_values
       ? diffProperties(old_values.properties ?? {}, new_values.properties ?? {})
@@ -79,7 +91,7 @@ export async function auditedMutation({
     environment: env.name,
     tool_name: toolName,
     object_type: objectType,
-    object_id: result?.id ?? old_values?.id ?? null,
+    object_id: result?.id ?? fullOld?.id ?? null,
     operation,
     old_values,
     new_values,
@@ -97,6 +109,23 @@ export async function auditedMutation({
   }
 
   return { result, audit_id, changed_fields };
+}
+
+/**
+ * Return a new shape with `properties` filtered to only the listed keys.
+ * Pass-through for null/undefined or when no filter is set.
+ *
+ * @param {object|null|undefined} shape
+ * @param {string[]|null} keys
+ */
+function applyKeyFilter(shape, keys) {
+  if (!shape || !keys || !Array.isArray(keys)) return shape;
+  const props = shape.properties ?? {};
+  const filtered = {};
+  for (const k of keys) {
+    if (k in props) filtered[k] = props[k];
+  }
+  return { ...shape, properties: filtered };
 }
 
 /**
@@ -141,6 +170,10 @@ export async function auditedUpdate({
       await withRetry(() => basicApi.update(id, { properties }));
       return await withRetry(() => basicApi.getById(id, propsToCapture));
     },
+    // Lean audit storage: only keep the keys the user explicitly updated.
+    // Defaults like firstname/email and SDK auto-includes (hs_object_id,
+    // createdate, lastmodifieddate) get dropped from old/new captures.
+    filterCapturedKeys: Object.keys(properties),
     confirmProduction,
   });
 }
