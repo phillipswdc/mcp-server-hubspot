@@ -12,6 +12,10 @@ It gives an MCP client a safe, compact interface for:
 
 This server runs over `stdio`, uses the official HubSpot SDK under the hood, and persists audit history plus property-schema cache in a local SQLite database.
 
+## Built With AI Assistance using Claude Code
+
+Large parts of this codebase were drafted with [Claude](https://www.anthropic.com/claude) (Anthropic).
+
 ## Why This Exists
 
 HubSpot is easy to read from and dangerously easy to mutate badly if an agent is operating with weak guardrails.
