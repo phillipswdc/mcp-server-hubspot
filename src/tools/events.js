@@ -21,6 +21,21 @@ const isoDateString = z
   });
 
 /**
+ * HubSpot's /events/v3/events endpoint requires at least one scoping filter,
+ * otherwise it returns a 400 "Must specify an eventType or objectType". We
+ * check client-side so the model gets a clear, actionable error instead of
+ * a raw HubSpot 400.
+ */
+function hasAtLeastOneScope(input) {
+  return Boolean(
+    input?.object_type ||
+      input?.object_id !== undefined ||
+      input?.event_type ||
+      (Array.isArray(input?.event_ids) && input.event_ids.length > 0)
+  );
+}
+
+/**
  * @param {import("@modelcontextprotocol/sdk/server/mcp.js").McpServer} server
  */
 export function registerEventTools(server) {
@@ -91,6 +106,17 @@ export function registerEventTools(server) {
         ),
     },
     async (input) => {
+      if (!hasAtLeastOneScope(input)) {
+        return errorText(
+          new Error(
+            "search_events requires at least one of: object_type, object_id, " +
+              "event_type, or event_ids. HubSpot rejects unscoped queries with " +
+              "a 400. Use list_event_types to find an event_type, or supply " +
+              "object_type (e.g. 'contacts') with object_id to scope to one record."
+          ),
+          "missing-scope"
+        );
+      }
       try {
         return jsonText(await hubspot.searchEvents(input));
       } catch (err) {

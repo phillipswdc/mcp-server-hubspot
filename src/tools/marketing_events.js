@@ -10,7 +10,6 @@
 import { z } from "zod";
 import { hubspot } from "../hubspot/index.js";
 import { jsonText, plainText, errorText, statusOf } from "./_shared.js";
-import { searchInputShape } from "./_search.js";
 import { DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT } from "../config/constants.js";
 
 const ATTENDANCE_STATES = ["REGISTERED", "ATTENDED", "CANCELLED", "NO_SHOW"];
@@ -94,9 +93,20 @@ export function registerMarketingEventTools(server) {
 
   server.tool(
     "search_marketing_events",
-    "Search marketing events by query and/or property filters via the CRM " +
-      "search API. Use for filtering by name, date range, status, organizer, etc.",
-    searchInputShape("Specific marketing event properties to return per result."),
+    "Search marketing events by external_event_id (the ID assigned by the " +
+      "source app — e.g. a Zoom webinar ID or Eventbrite event ID). " +
+      "Does NOT search by event name. To find an event by name, use " +
+      "list_marketing_events and filter the results client-side. Returns " +
+      "lean identifier records — chain into get_marketing_event_by_id for " +
+      "full detail.",
+    {
+      query: z
+        .string()
+        .min(1)
+        .describe(
+          "External event ID (or partial match) from the source app. Not a name search."
+        ),
+    },
     async (input) => {
       try {
         return jsonText(await hubspot.searchMarketingEvents(input));

@@ -19,25 +19,7 @@
 import { sdk } from "./client.js";
 import { withRetry } from "./retry.js";
 import { compact } from "./compact.js";
-import { autoCacheLargeValues, maybeCacheResponse } from "./_cache.js";
-import { buildSearchRequest } from "./_search.js";
-
-/** Default CRM properties surfaced when search_marketing_events isn't given a list. */
-const DEFAULT_PROPERTIES = Object.freeze([
-  "hs_event_name",
-  "hs_event_type",
-  "hs_event_status",
-  "hs_event_organizer",
-  "hs_event_url",
-  "hs_start_datetime",
-  "hs_end_datetime",
-  "hs_event_completed",
-  "hs_event_cancelled",
-  "hs_external_event_id",
-  "hs_external_account_id",
-  "createdate",
-  "hs_lastmodifieddate",
-]);
+import { autoCacheLargeValues } from "./_cache.js";
 
 /**
  * Reshape a dedicated-API MarketingEventPublicReadResponseV2 into a stable
@@ -87,19 +69,14 @@ function toIso(v) {
   return v instanceof Date ? v.toISOString() : v;
 }
 
-/** Coerce the search-API SimplePublicObject shape into our standard envelope. */
-function shapeMarketingEventFromCrm(res) {
-  return (
-    compact({
-      id: res.id,
-      properties: autoCacheLargeValues(res.properties, {
-        object_type: "marketing_events",
-        object_id: res.id,
-      }),
-      createdAt: res.createdAt,
-      updatedAt: res.updatedAt,
-    }) ?? { id: res.id }
-  );
+/** Reshape an identifiersApi.doSearch result into a flat envelope. */
+function shapeMarketingEventIdentifier(res) {
+  return compact({
+    id: res.objectId,
+    external_account_id: res.externalAccountId,
+    external_event_id: res.externalEventId,
+    app_id: res.appId,
+  });
 }
 
 /**
@@ -132,29 +109,34 @@ export async function getMarketingEventById(objectId) {
 }
 
 /**
- * Search marketing events via the generic CRM search endpoint. Supports the
- * standard filter / sort / cache input shape used elsewhere in the project.
+ * Search marketing events by external_event_id (the ID assigned by the
+ * source app like Zoom, GoToWebinar, etc.). Hits
+ * /marketing/v3/marketing-events/events/search?q=...
  *
- * @param {import("./_search.js").SearchInput} input
+ * IMPORTANT: this does NOT search by event name. To find an event by name,
+ * page through listMarketingEvents and filter client-side. HubSpot doesn't
+ * expose a name-based search for the marketing_events object type — the
+ * generic CRM search endpoint rejects it.
+ *
+ * Returns lean identifier records (objectId, externalAccountId,
+ * externalEventId, appId); chain into getMarketingEventById for full detail.
+ *
+ * @param {{ query: string }} input
  */
 export async function searchMarketingEvents(input) {
-  const req = buildSearchRequest(input, DEFAULT_PROPERTIES);
+  if (!input?.query) {
+    throw new Error("search_marketing_events requires a 'query' string.");
+  }
   const res = await withRetry(() =>
-    sdk.crm.objects.searchApi.doSearch("marketing_events", req)
+    sdk.marketing.events.identifiersApi.doSearch(input.query)
   );
-  const shaped = (res?.results ?? []).map(shapeMarketingEventFromCrm);
-  const response = {
-    total: res?.total ?? shaped.length,
-    count: shaped.length,
-    next_cursor: res?.paging?.next?.after,
-    results: shaped,
+  const results = (res?.results ?? []).map(shapeMarketingEventIdentifier);
+  return {
+    count: results.length,
+    results,
+    next_step:
+      "These are identifier-only records. Use get_marketing_event_by_id with the returned id to fetch full event detail.",
   };
-  return maybeCacheResponse(response, {
-    useCache: input?.cache === true,
-    tool_name: "search_marketing_events",
-    source_args: input,
-    object_type: "marketing_events",
-  });
 }
 
 /**
@@ -194,15 +176,28 @@ export async function getMarketingEventParticipationCounters(args) {
   };
 }
 
-/** Reshape a ParticipationBreakdown row into a flat, named envelope. */
+/**
+ * Reshape a ParticipationBreakdown row into a flat, named envelope.
+ * Associations are nested under {contact, marketingEvent} on the SDK type —
+ * we flatten the useful identifiers to top-level keys so downstream tool
+ * calls (e.g. list_contact_marketing_event_participations) can chain off them.
+ */
 function shapeParticipation(row) {
   if (!row) return null;
   const props = row.properties ?? {};
   const assoc = row.associations ?? {};
+  const contact = assoc.contact ?? {};
+  const event = assoc.marketingEvent ?? {};
   return compact({
     id: row.id,
-    contact_id: assoc.contactId,
-    marketing_event_id: assoc.marketingEventId,
+    contact_id: contact.contactId,
+    contact_email: contact.email,
+    contact_firstname: contact.firstname,
+    contact_lastname: contact.lastname,
+    marketing_event_id: event.marketingEventId,
+    marketing_event_name: event.name,
+    external_event_id: event.externalEventId,
+    external_account_id: event.externalAccountId,
     attendance_state: props.attendanceState,
     attendance_duration_seconds: props.attendanceDurationSeconds,
     attendance_percentage: props.attendancePercentage,
