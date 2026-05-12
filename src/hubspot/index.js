@@ -106,6 +106,7 @@ import {
   searchCarts,
   listCartsForContact,
 } from "./carts.js";
+import { searchEvents, listEventTypes } from "./events.js";
 import { env } from "../config/env.js";
 import { dbPath } from "../db/index.js";
 
@@ -229,4 +230,8 @@ export const hubspot = {
   getCartById,
   searchCarts,
   listCartsForContact,
+
+  // Events (read-only) — unified events stream
+  searchEvents,
+  listEventTypes,
 };
