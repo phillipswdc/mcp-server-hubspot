@@ -107,6 +107,14 @@ import {
   listCartsForContact,
 } from "./carts.js";
 import { searchEvents, listEventTypes } from "./events.js";
+import {
+  listMarketingEvents,
+  getMarketingEventById,
+  searchMarketingEvents,
+  getMarketingEventParticipationCounters,
+  listMarketingEventParticipants,
+  listContactMarketingEventParticipations,
+} from "./marketing_events.js";
 import { env } from "../config/env.js";
 import { dbPath } from "../db/index.js";
 
@@ -234,4 +242,12 @@ export const hubspot = {
   // Events (read-only) — unified events stream
   searchEvents,
   listEventTypes,
+
+  // Marketing Events (read-only) — webinars / conferences as CRM records
+  listMarketingEvents,
+  getMarketingEventById,
+  searchMarketingEvents,
+  getMarketingEventParticipationCounters,
+  listMarketingEventParticipants,
+  listContactMarketingEventParticipations,
 };

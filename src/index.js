@@ -39,6 +39,7 @@ const { registerQuoteTools } = await import("./tools/quotes.js");
 const { registerCommerceReadTools } = await import("./tools/commerce_reads.js");
 const { registerFeatureAvailabilityTools } = await import("./tools/feature_availability.js");
 const { registerEventTools } = await import("./tools/events.js");
+const { registerMarketingEventTools } = await import("./tools/marketing_events.js");
 
 const server = new McpServer({
   name: "hubspot",
@@ -61,6 +62,7 @@ registerQuoteTools(server);
 registerCommerceReadTools(server);
 registerFeatureAvailabilityTools(server);
 registerEventTools(server);
+registerMarketingEventTools(server);
 
 await server.connect(new StdioServerTransport());
 
