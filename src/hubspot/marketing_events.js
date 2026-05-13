@@ -19,7 +19,8 @@
 import { sdk } from "./client.js";
 import { withRetry } from "./retry.js";
 import { compact } from "./compact.js";
-import { autoCacheLargeValues } from "./_cache.js";
+import { autoCacheLargeValues, paginateAndCache } from "./_cache.js";
+import { AUTO_PAGINATE_PAGE_SIZE } from "../config/constants.js";
 
 /**
  * Reshape a dedicated-API MarketingEventPublicReadResponseV2 into a stable
@@ -82,9 +83,30 @@ function shapeMarketingEventIdentifier(res) {
 /**
  * List marketing events (paginated, no filter).
  *
- * @param {{ after?: string, limit?: number }} [options]
+ * When `cache: true`, walks every page until exhaustion (or AUTO_PAGINATE
+ * caps trip) and stashes the union under a cache_id — useful for portals
+ * with hundreds of events where the model wants to slice the set locally
+ * without burning rate-limit budget on repeat fetches.
+ *
+ * @param {{ after?: string, limit?: number, cache?: boolean }} [options]
  */
 export async function listMarketingEvents(options = {}) {
+  if (options.cache) {
+    return paginateAndCache({
+      tool_name: "list_marketing_events",
+      source_args: options,
+      object_type: "marketing_events",
+      fetchPage: async (cursor) => {
+        const res = await withRetry(() =>
+          sdk.marketing.events.basicApi.getAll(cursor, AUTO_PAGINATE_PAGE_SIZE)
+        );
+        return {
+          results: (res?.results ?? []).map(shapeMarketingEvent).filter(Boolean),
+          next_cursor: res?.paging?.next?.after,
+        };
+      },
+    });
+  }
   const res = await withRetry(() =>
     sdk.marketing.events.basicApi.getAll(options.after, options.limit)
   );
@@ -177,41 +199,51 @@ export async function getMarketingEventParticipationCounters(args) {
 }
 
 /**
- * Reshape a ParticipationBreakdown row into a flat, named envelope.
+ * Reshape a ParticipationBreakdown row into the project's standard
+ * {id, properties, createdAt} envelope so query_cache can filter/sort
+ * against cached participation sets via json_extract on properties.<field>.
+ *
  * Associations are nested under {contact, marketingEvent} on the SDK type —
- * we flatten the useful identifiers to top-level keys so downstream tool
- * calls (e.g. list_contact_marketing_event_participations) can chain off them.
+ * we flatten the useful identifiers into properties so they're queryable
+ * alongside attendance_state, occurred_at, etc.
  */
 function shapeParticipation(row) {
   if (!row) return null;
-  const props = row.properties ?? {};
+  const p = row.properties ?? {};
   const assoc = row.associations ?? {};
   const contact = assoc.contact ?? {};
   const event = assoc.marketingEvent ?? {};
   return compact({
     id: row.id,
-    contact_id: contact.contactId,
-    contact_email: contact.email,
-    contact_firstname: contact.firstname,
-    contact_lastname: contact.lastname,
-    marketing_event_id: event.marketingEventId,
-    marketing_event_name: event.name,
-    external_event_id: event.externalEventId,
-    external_account_id: event.externalAccountId,
-    attendance_state: props.attendanceState,
-    attendance_duration_seconds: props.attendanceDurationSeconds,
-    attendance_percentage: props.attendancePercentage,
-    occurred_at:
-      typeof props.occurredAt === "number"
-        ? new Date(props.occurredAt).toISOString()
-        : props.occurredAt,
-    created_at: toIso(row.createdAt),
+    properties: compact({
+      contact_id: contact.contactId,
+      contact_email: contact.email,
+      contact_firstname: contact.firstname,
+      contact_lastname: contact.lastname,
+      marketing_event_id: event.marketingEventId,
+      marketing_event_name: event.name,
+      external_event_id: event.externalEventId,
+      external_account_id: event.externalAccountId,
+      attendance_state: p.attendanceState,
+      attendance_duration_seconds: p.attendanceDurationSeconds,
+      attendance_percentage: p.attendancePercentage,
+      occurred_at:
+        typeof p.occurredAt === "number"
+          ? new Date(p.occurredAt).toISOString()
+          : p.occurredAt,
+    }) ?? {},
+    createdAt: toIso(row.createdAt),
   });
 }
 
 /**
  * List participants (by attendance state) for a single marketing event.
- * Accepts marketing_event_id OR external_account_id + external_event_id.
+ * Accepts marketing_event_id OR external_account_id + external_account_id.
+ *
+ * When `cache: true`, auto-paginates every state-breakdown page and caches
+ * the union — the primary use case for this flag, since HubSpot's
+ * participant pagination forces small page sizes and large events
+ * (hundreds-to-thousands of registrants) get expensive fast.
  *
  * @param {object} args
  * @param {string|number} [args.marketing_event_id]
@@ -219,38 +251,57 @@ function shapeParticipation(row) {
  * @param {string} [args.external_account_id]
  * @param {string} [args.state] Filter to a specific state (REGISTERED / ATTENDED / CANCELLED / NO_SHOW)
  * @param {string} [args.contact_identifier] Filter to a single contact (email or vid)
- * @param {number} [args.limit]
- * @param {string} [args.after]
+ * @param {number} [args.limit] Single-page mode only — ignored when cache:true uses AUTO_PAGINATE_PAGE_SIZE.
+ * @param {string} [args.after] Single-page mode only.
+ * @param {boolean} [args.cache] When true, auto-paginate the full breakdown and cache the union.
  */
 export async function listMarketingEventParticipants(args) {
   const api = sdk.marketing.events.retrieveParticipantStateApi;
-  let res;
-  if (args.marketing_event_id !== undefined && args.marketing_event_id !== null) {
-    res = await withRetry(() =>
-      api.getParticipationsBreakdownByMarketingEventId(
+
+  const fetchOnePage = (limit, after) => {
+    if (args.marketing_event_id !== undefined && args.marketing_event_id !== null) {
+      return api.getParticipationsBreakdownByMarketingEventId(
         Number(args.marketing_event_id),
         args.contact_identifier,
         args.state,
-        args.limit,
-        args.after
-      )
-    );
-  } else if (args.external_account_id && args.external_event_id) {
-    res = await withRetry(() =>
-      api.getParticipationsBreakdownByExternalEventId(
+        limit,
+        after
+      );
+    }
+    if (args.external_account_id && args.external_event_id) {
+      return api.getParticipationsBreakdownByExternalEventId(
         args.external_account_id,
         args.external_event_id,
         args.contact_identifier,
         args.state,
-        args.limit,
-        args.after
-      )
-    );
-  } else {
+        limit,
+        after
+      );
+    }
     throw new Error(
       "Provide either marketing_event_id, or both external_account_id and external_event_id."
     );
+  };
+
+  if (args.cache) {
+    return paginateAndCache({
+      tool_name: "list_marketing_event_participants",
+      source_args: args,
+      object_type: "marketing_event_participations",
+      fetchPage: async (cursor) => {
+        const res = await withRetry(() =>
+          fetchOnePage(AUTO_PAGINATE_PAGE_SIZE, cursor)
+        );
+        return {
+          results: (res?.results ?? []).map(shapeParticipation).filter(Boolean),
+          next_cursor: res?.paging?.next?.after,
+          total: res?.total,
+        };
+      },
+    });
   }
+
+  const res = await withRetry(() => fetchOnePage(args.limit, args.after));
   const results = (res?.results ?? []).map(shapeParticipation).filter(Boolean);
   return {
     total: res?.total ?? results.length,
@@ -263,15 +314,42 @@ export async function listMarketingEventParticipants(args) {
 /**
  * List every marketing event participation for a single contact.
  *
+ * When `cache: true`, auto-paginates the full set and caches the union.
+ *
  * @param {string} contactIdentifier Contact email or vid
- * @param {{ state?: string, limit?: number, after?: string }} [options]
+ * @param {{ state?: string, limit?: number, after?: string, cache?: boolean }} [options]
  */
 export async function listContactMarketingEventParticipations(
   contactIdentifier,
   options = {}
 ) {
+  const api = sdk.marketing.events.retrieveParticipantStateApi;
+
+  if (options.cache) {
+    return paginateAndCache({
+      tool_name: "list_contact_marketing_event_participations",
+      source_args: { contact_identifier: contactIdentifier, ...options },
+      object_type: "marketing_event_participations",
+      fetchPage: async (cursor) => {
+        const res = await withRetry(() =>
+          api.getParticipationsBreakdownByContactId(
+            contactIdentifier,
+            options.state,
+            AUTO_PAGINATE_PAGE_SIZE,
+            cursor
+          )
+        );
+        return {
+          results: (res?.results ?? []).map(shapeParticipation).filter(Boolean),
+          next_cursor: res?.paging?.next?.after,
+          total: res?.total,
+        };
+      },
+    });
+  }
+
   const res = await withRetry(() =>
-    sdk.marketing.events.retrieveParticipantStateApi.getParticipationsBreakdownByContactId(
+    api.getParticipationsBreakdownByContactId(
       contactIdentifier,
       options.state,
       options.limit,

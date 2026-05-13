@@ -234,3 +234,16 @@ export const RESULT_CACHE_TTL_MS = 60 * 60 * 1000;
 
 /** Preview length (chars) for cached values shown alongside the handle. */
 export const CACHE_PREVIEW_CHARS = 200;
+
+/**
+ * Auto-pagination caps for paginateAndCache. When a list/search tool gets
+ * cache: true, the server walks every page until the cursor is exhausted OR
+ * one of these limits trips. Conservative defaults — large enough to cover
+ * realistic marketing-event registrant lists (1-2k rows), small enough to
+ * prevent a runaway query from monopolizing the rate budget.
+ */
+export const AUTO_PAGINATE_MAX_ROWS = 10_000;
+export const AUTO_PAGINATE_MAX_PAGES = 200;
+export const AUTO_PAGINATE_MAX_MS = 60_000;
+/** Default per-page request size when auto-paginating; HubSpot caps at 100 for most endpoints. */
+export const AUTO_PAGINATE_PAGE_SIZE = 100;

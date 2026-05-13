@@ -42,7 +42,8 @@ export function registerMarketingEventTools(server) {
     "List marketing events in the portal (webinars, conferences, etc.). " +
       "Returns the dedicated-API shape (eventName, organizer, dates, attendance " +
       "counters). Paginated via next_cursor. For filtering by name / date / " +
-      "status, use search_marketing_events instead.",
+      "status, use search_marketing_events instead. Pass cache:true to auto-" +
+      "paginate the full set and stash it under a cache_id for query_cache.",
     {
       limit: z
         .number()
@@ -51,11 +52,19 @@ export function registerMarketingEventTools(server) {
         .max(MAX_PAGE_LIMIT)
         .optional()
         .default(DEFAULT_PAGE_LIMIT)
-        .describe(`Max events per page (1-${MAX_PAGE_LIMIT}). Defaults to ${DEFAULT_PAGE_LIMIT}.`),
+        .describe(`Max events per page (1-${MAX_PAGE_LIMIT}). Defaults to ${DEFAULT_PAGE_LIMIT}. Ignored when cache:true (server uses max page size internally).`),
       after: z
         .string()
         .optional()
         .describe("Pagination cursor returned as next_cursor from a prior call."),
+      cache: z
+        .boolean()
+        .optional()
+        .describe(
+          "When true, auto-paginate every page and cache the union under a cache_id. " +
+            "Returns a small handle + sample instead of inline results. Bounded by " +
+            "AUTO_PAGINATE caps (rows/pages/wall-clock) to prevent runaway queries."
+        ),
     },
     async (args) => {
       try {
@@ -136,7 +145,10 @@ export function registerMarketingEventTools(server) {
     "Paginated list of contacts who participated in a marketing event, with " +
       "attendance state and duration. Identify the event by marketing_event_id " +
       "OR external_account_id + external_event_id. Optionally filter by " +
-      "attendance state or to a specific contact.",
+      "attendance state or to a specific contact. Pass cache:true to auto-" +
+      "paginate the full registrant list (often hundreds-to-thousands) and " +
+      "stash it under a cache_id — recommended for any analysis that needs " +
+      "more than one page.",
     {
       ...externalIdShape,
       state: z
@@ -154,11 +166,18 @@ export function registerMarketingEventTools(server) {
         .max(MAX_PAGE_LIMIT)
         .optional()
         .default(DEFAULT_PAGE_LIMIT)
-        .describe(`Max participants per page (1-${MAX_PAGE_LIMIT}).`),
+        .describe(`Max participants per page (1-${MAX_PAGE_LIMIT}). Ignored when cache:true.`),
       after: z
         .string()
         .optional()
         .describe("Pagination cursor returned as next_cursor from a prior call."),
+      cache: z
+        .boolean()
+        .optional()
+        .describe(
+          "When true, auto-paginate every page and cache the union under a cache_id. " +
+            "Strongly recommended for large events — collapses N paginated calls into 1."
+        ),
     },
     async (args) => {
       try {
@@ -172,7 +191,8 @@ export function registerMarketingEventTools(server) {
   server.tool(
     "list_contact_marketing_event_participations",
     "List every marketing event participation for a single contact, with " +
-      "attendance state and duration per event.",
+      "attendance state and duration per event. Pass cache:true to auto-" +
+      "paginate the full set when a contact has attended many events.",
     {
       contact_identifier: z
         .string()
@@ -188,11 +208,17 @@ export function registerMarketingEventTools(server) {
         .max(MAX_PAGE_LIMIT)
         .optional()
         .default(DEFAULT_PAGE_LIMIT)
-        .describe(`Max participations per page (1-${MAX_PAGE_LIMIT}).`),
+        .describe(`Max participations per page (1-${MAX_PAGE_LIMIT}). Ignored when cache:true.`),
       after: z
         .string()
         .optional()
         .describe("Pagination cursor returned as next_cursor from a prior call."),
+      cache: z
+        .boolean()
+        .optional()
+        .describe(
+          "When true, auto-paginate every page and cache the union under a cache_id."
+        ),
     },
     async (args) => {
       try {
@@ -201,6 +227,7 @@ export function registerMarketingEventTools(server) {
             state: args.state,
             limit: args.limit,
             after: args.after,
+            cache: args.cache,
           })
         );
       } catch (err) {

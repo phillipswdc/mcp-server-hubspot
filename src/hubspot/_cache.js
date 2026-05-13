@@ -23,6 +23,9 @@ import {
   AUTO_CACHE_VALUE_BYTES,
   RESULT_CACHE_TTL_MS,
   CACHE_PREVIEW_CHARS,
+  AUTO_PAGINATE_MAX_ROWS,
+  AUTO_PAGINATE_MAX_PAGES,
+  AUTO_PAGINATE_MAX_MS,
 } from "../config/constants.js";
 import { env } from "../config/env.js";
 
@@ -198,4 +201,104 @@ function collectPropertyKeys(entities) {
     }
   }
   return [...set].sort();
+}
+
+/**
+ * Walk every page of a paginated list/search call and cache the union under
+ * one cache_id. Lets callers expose `cache: true` on tools whose underlying
+ * API forces small page sizes (e.g. marketing event participants, capped at
+ * ~100 per call) so the model can ask once and then query the local set
+ * freely via query_cache.
+ *
+ * Bounded by AUTO_PAGINATE_MAX_{ROWS,PAGES,MS} from constants — a runaway
+ * filter can't burn the entire HubSpot rate budget. When a cap is hit, the
+ * cached set is partial and stopped_reason indicates why; downstream code
+ * can decide whether to retry with a tighter filter.
+ *
+ * @param {object} ctx
+ * @param {string} ctx.tool_name For cache provenance.
+ * @param {object} ctx.source_args Original tool arguments — stored for debug/repro.
+ * @param {string} ctx.object_type
+ * @param {(cursor: string|null|undefined) => Promise<{results: object[], next_cursor?: string, total?: number}>} ctx.fetchPage
+ *   Caller-supplied page fetcher. Receives the cursor returned from the
+ *   prior page (undefined on the first call) and returns shaped results
+ *   plus next_cursor.
+ * @param {number} [ctx.maxRows]
+ * @param {number} [ctx.maxPages]
+ * @param {number} [ctx.maxMs]
+ * @param {number} [ctx.sampleSize] Number of results to include inline in the handle envelope.
+ * @returns {Promise<object>} Handle envelope: cache_id + sample + counters.
+ */
+export async function paginateAndCache(ctx) {
+  const start = Date.now();
+  const maxRows = ctx.maxRows ?? AUTO_PAGINATE_MAX_ROWS;
+  const maxPages = ctx.maxPages ?? AUTO_PAGINATE_MAX_PAGES;
+  const maxMs = ctx.maxMs ?? AUTO_PAGINATE_MAX_MS;
+  const sampleSize = ctx.sampleSize ?? 3;
+
+  const allResults = [];
+  let cursor;
+  let pages = 0;
+  let total;
+  let stoppedReason;
+
+  while (true) {
+    if (Date.now() - start > maxMs) {
+      stoppedReason = "max_ms";
+      break;
+    }
+    if (pages >= maxPages) {
+      stoppedReason = "max_pages";
+      break;
+    }
+
+    const page = await ctx.fetchPage(cursor);
+    pages += 1;
+
+    if (typeof page?.total === "number" && total === undefined) {
+      total = page.total;
+    }
+    const pageResults = page?.results ?? [];
+    for (const r of pageResults) {
+      allResults.push(r);
+      if (allResults.length >= maxRows) break;
+    }
+
+    if (allResults.length >= maxRows) {
+      stoppedReason = "max_rows";
+      break;
+    }
+
+    cursor = page?.next_cursor;
+    if (!cursor) {
+      stoppedReason = "exhausted";
+      break;
+    }
+  }
+
+  const handle = cacheResultSet({
+    tool_name: ctx.tool_name,
+    source_args: ctx.source_args,
+    object_type: ctx.object_type,
+    results: allResults,
+  });
+
+  return {
+    cache_id: handle.cache_id,
+    cache_type: "result_set",
+    object_type: ctx.object_type,
+    total: total ?? allResults.length,
+    count: allResults.length,
+    pages_fetched: pages,
+    stopped_reason: stoppedReason,
+    elapsed_ms: Date.now() - start,
+    expires_at_iso: new Date(handle.expires_at).toISOString(),
+    byte_length: handle.byte_length,
+    sample: allResults.slice(0, sampleSize),
+    available_properties: collectPropertyKeys(allResults),
+    next_steps:
+      stoppedReason === "exhausted"
+        ? "Full set cached. Use query_cache(cache_id) to filter/sort against it without hitting HubSpot again."
+        : `Partial cache — pagination stopped on ${stoppedReason}. Tighten the filter (date range, state, etc.) or raise the cap if you need the full set.`,
+  };
 }
