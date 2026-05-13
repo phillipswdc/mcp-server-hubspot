@@ -12,6 +12,7 @@ import {
   listActiveCaches,
   deleteCache,
 } from "../db/queries/result_cache.js";
+import { cacheResultSet } from "./_cache.js";
 
 /**
  * Dereference a cached property value (cache_type='property_value'). Returns
@@ -153,6 +154,97 @@ export function listCaches(filters = {}) {
  */
 export function expireCache(cacheId) {
   return deleteCache(cacheId);
+}
+
+/**
+ * Concatenate N result_set caches into a new combined cache. Designed for
+ * fan-in workflows — e.g. enrichment that chunked a 1k-record set into 11
+ * batches of 100 via search IN-filter, producing 11 cache_ids; merge_caches
+ * collapses them into one queryable set.
+ *
+ * Validation: every input cache_id must exist, be non-expired, and be
+ * cache_type='result_set'. Property-value caches and missing/expired IDs
+ * fail the call with a clear error before any work is done.
+ *
+ * Deduplication: by default rows with the same `id` field are deduped
+ * (first occurrence wins). Pass dedupe_by_id=false to keep duplicates,
+ * which is the right call when intentional N-times-the-same-record
+ * patterns are present.
+ *
+ * Object-type metadata: when all input caches share an object_type, the
+ * merged cache inherits it. Mixed types get null (still queryable, just
+ * loses that bit of provenance).
+ *
+ * @param {object} args
+ * @param {string[]} args.cache_ids Two or more cache_ids to merge.
+ * @param {boolean} [args.dedupe_by_id=true] Drop duplicates by entity.id.
+ * @returns {{ cache_id: string, count: number, sources: object[], deduped: number, expires_at_iso: string, byte_length: number }}
+ */
+export function mergeCaches({ cache_ids, dedupe_by_id = true }) {
+  if (!Array.isArray(cache_ids) || cache_ids.length < 2) {
+    throw new Error("merge_caches requires at least 2 cache_ids.");
+  }
+
+  const loaded = [];
+  for (const id of cache_ids) {
+    const row = getCache(id);
+    if (!row) {
+      throw new Error(`Cache ${id} not found or expired.`);
+    }
+    if (row.cache_type !== "result_set") {
+      throw new Error(
+        `Cache ${id} is type "${row.cache_type}", not "result_set". Only result_set caches can be merged.`
+      );
+    }
+    loaded.push(row);
+  }
+
+  const combined = [];
+  const seenIds = new Set();
+  let deduped = 0;
+  for (const row of loaded) {
+    const parsed = JSON.parse(row.payload);
+    if (!Array.isArray(parsed)) continue;
+    for (const entity of parsed) {
+      if (dedupe_by_id && entity?.id != null) {
+        const key = String(entity.id);
+        if (seenIds.has(key)) {
+          deduped += 1;
+          continue;
+        }
+        seenIds.add(key);
+      }
+      combined.push(entity);
+    }
+  }
+
+  const objectTypes = new Set(loaded.map((r) => r.object_type).filter(Boolean));
+  const objectType = objectTypes.size === 1 ? [...objectTypes][0] : null;
+
+  const handle = cacheResultSet({
+    tool_name: "merge_caches",
+    source_args: { source_cache_ids: cache_ids, dedupe_by_id },
+    object_type: objectType,
+    results: combined,
+  });
+
+  return {
+    cache_id: handle.cache_id,
+    cache_type: "result_set",
+    object_type: objectType,
+    count: combined.length,
+    deduped,
+    expires_at_iso: new Date(handle.expires_at).toISOString(),
+    byte_length: handle.byte_length,
+    sources: loaded.map((r) => ({
+      cache_id: r.cache_id,
+      object_type: r.object_type,
+      result_count: r.result_count,
+      tool_name: r.tool_name,
+    })),
+    next_steps:
+      "Use query_cache(cache_id) against the merged set to filter/sort across the full union.",
+  };
 }
 
 // --- Internal helpers ---

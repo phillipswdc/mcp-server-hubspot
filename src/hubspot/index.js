@@ -53,6 +53,7 @@ import {
   cacheSummary,
   listCaches,
   expireCache,
+  mergeCaches,
 } from "./cache.js";
 import {
   getOrderById,
@@ -186,6 +187,7 @@ export const hubspot = {
   cacheSummary,
   listCaches,
   expireCache,
+  mergeCaches,
 
   // Commerce: orders
   getOrderById,

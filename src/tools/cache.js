@@ -166,4 +166,34 @@ export function registerCacheTools(server) {
       }
     }
   );
+
+  server.tool(
+    "merge_caches",
+    "Concatenate two or more result_set caches into a new combined cache. " +
+      "Designed for fan-in workflows — e.g. enrichment that split work into " +
+      "N batches (search_contacts IN-filter at 100 ids/call → N cache_ids) " +
+      "and you want to query the union as one set. Returns a new cache_id; " +
+      "use query_cache against it as usual. Deduplicates by entity.id by " +
+      "default; pass dedupe_by_id=false to keep duplicates.",
+    {
+      cache_ids: z
+        .array(z.string())
+        .min(2)
+        .describe("Two or more cache_ids of result_set caches to merge."),
+      dedupe_by_id: z
+        .boolean()
+        .optional()
+        .default(true)
+        .describe(
+          "When true (default), drop duplicate entities sharing an id field (first occurrence wins). Set to false to preserve duplicates."
+        ),
+    },
+    async ({ cache_ids, dedupe_by_id }) => {
+      try {
+        return jsonText(hubspot.mergeCaches({ cache_ids, dedupe_by_id }));
+      } catch (err) {
+        return errorText(err, statusOf(err));
+      }
+    }
+  );
 }

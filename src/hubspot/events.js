@@ -16,31 +16,39 @@
 import { sdk } from "./client.js";
 import { withRetry } from "./retry.js";
 import { compact } from "./compact.js";
-import { autoCacheLargeValues, maybeCacheResponse } from "./_cache.js";
+import { autoCacheLargeValues, maybeCacheResponse, paginateAndCache } from "./_cache.js";
+import { AUTO_PAGINATE_PAGE_SIZE } from "../config/constants.js";
 
 /**
- * Reshape a raw ExternalUnifiedEvent into the project's standard envelope.
- * Properties dict is run through auto-cache so any oversized value (e.g. a
- * long page-view URL fragment, raw form payload) gets replaced with a
- * cached_ref handle rather than ballooning the response.
+ * Reshape a raw ExternalUnifiedEvent into the project's standard
+ * {id, properties} envelope so query_cache can filter/sort uniformly via
+ * properties.<field> against cached event sets.
+ *
+ * Metadata (event_type, object_type, object_id, occurred_at) is hoisted
+ * INTO properties so it's queryable; the raw event properties dict is
+ * spread in alongside it. Oversized values get auto-cached as elsewhere
+ * to keep responses bounded.
  *
  * @param {object} res Raw event from the SDK.
  */
 function shapeEvent(res) {
+  const eventProps = autoCacheLargeValues(res.properties, {
+    object_type: "events",
+    object_id: res.id,
+  });
   return (
     compact({
       id: res.id,
-      event_type: res.eventType,
-      object_type: res.objectType,
-      object_id: res.objectId,
-      occurred_at:
-        res.occurredAt instanceof Date
-          ? res.occurredAt.toISOString()
-          : res.occurredAt,
-      properties: autoCacheLargeValues(res.properties, {
-        object_type: "events",
-        object_id: res.id,
-      }),
+      properties: compact({
+        event_type: res.eventType,
+        object_type: res.objectType,
+        object_id: res.objectId,
+        occurred_at:
+          res.occurredAt instanceof Date
+            ? res.occurredAt.toISOString()
+            : res.occurredAt,
+        ...(eventProps ?? {}),
+      }) ?? {},
     }) ?? { id: res.id }
   );
 }
@@ -88,11 +96,52 @@ function toDate(v) {
 /**
  * Query the unified events stream.
  *
+ * When `cache: true`, walks every page until exhaustion (or AUTO_PAGINATE
+ * caps trip) and stashes the union under a cache_id. Without that flag,
+ * the single-page response is returned inline.
+ *
+ * Event volume can be enormous on busy portals (millions of records), so
+ * the auto-paginate caps in constants.js are the load-bearing safety net.
+ * Always combine cache:true with a tight scope (event_type, object_id,
+ * occurred_after/before) on this endpoint.
+ *
  * @param {SearchEventsInput} [input]
  */
 export async function searchEvents(input = {}) {
   const occurredAfter = toDate(input.occurred_after);
   const occurredBefore = toDate(input.occurred_before);
+
+  if (input.cache) {
+    return paginateAndCache({
+      tool_name: "search_events",
+      source_args: input,
+      object_type: "events",
+      fetchPage: async (cursor) => {
+        const res = await withRetry(() =>
+          sdk.events.eventsApi.getPage(
+            input.object_type,
+            input.event_type,
+            cursor,
+            input.before,
+            AUTO_PAGINATE_PAGE_SIZE,
+            input.sort,
+            occurredAfter,
+            occurredBefore,
+            input.object_id !== undefined && input.object_id !== null
+              ? Number(input.object_id)
+              : undefined,
+            undefined,
+            undefined,
+            input.event_ids
+          )
+        );
+        return {
+          results: (res?.results ?? []).map(shapeEvent),
+          next_cursor: res?.paging?.next?.after,
+        };
+      },
+    });
+  }
 
   const res = await withRetry(() =>
     sdk.events.eventsApi.getPage(
@@ -107,8 +156,8 @@ export async function searchEvents(input = {}) {
       input.object_id !== undefined && input.object_id !== null
         ? Number(input.object_id)
         : undefined,
-      undefined, // objectPropertyPropname — dynamic-key filter, not exposed
-      undefined, // propertyPropname — dynamic-key filter, not exposed
+      undefined,
+      undefined,
       input.event_ids
     )
   );
@@ -121,7 +170,7 @@ export async function searchEvents(input = {}) {
   };
 
   return maybeCacheResponse(response, {
-    useCache: input.cache === true,
+    useCache: false,
     tool_name: "search_events",
     source_args: input,
     object_type: "events",

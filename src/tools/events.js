@@ -101,8 +101,11 @@ export function registerEventTools(server) {
         .boolean()
         .optional()
         .describe(
-          "When true, stash the full result set under a cache_id and return " +
-            "a handle + sample. Recommended for high-volume time ranges."
+          "When true, auto-paginate every page and stash the union under a " +
+            "cache_id (bounded by AUTO_PAGINATE caps). Returns a handle + sample " +
+            "instead of inline results. STRONGLY combine with a tight scope " +
+            "(event_type AND a date range) — event volume can be enormous and " +
+            "the cap will trip on unscoped queries."
         ),
     },
     async (input) => {
